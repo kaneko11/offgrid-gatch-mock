@@ -17,14 +17,19 @@ public sealed class InvocationMatcher
 
     public bool Matches(InvocationRecord invocation)
     {
-        if (!Equals(Method, invocation.Method) || ArgumentMatchers.Count != invocation.Arguments.Count)
+        return Matches(invocation.Method, invocation.Arguments);
+    }
+
+    public bool Matches(MethodInfo method, IReadOnlyList<object?> arguments)
+    {
+        if (!Equals(Method, method) || ArgumentMatchers.Count != arguments.Count)
         {
             return false;
         }
 
         for (var index = 0; index < ArgumentMatchers.Count; index++)
         {
-            if (!ArgumentMatchers[index].Matches(invocation.Arguments[index]))
+            if (!ArgumentMatchers[index].Matches(arguments[index]))
             {
                 return false;
             }

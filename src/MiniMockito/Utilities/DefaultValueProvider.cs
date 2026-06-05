@@ -4,7 +4,7 @@ namespace MiniMockito.Utilities;
 
 internal static class DefaultValueProvider
 {
-    private static readonly MethodInfo TaskFromResultMethod = typeof(Task)
+    internal static readonly MethodInfo TaskFromResultMethod = typeof(Task)
         .GetMethods(BindingFlags.Public | BindingFlags.Static)
         .Single(method =>
             method.Name == nameof(Task.FromResult)

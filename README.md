@@ -2,19 +2,22 @@
 
 MiniMockito.Net is a lightweight .NET mocking framework intended to feel natural with Visual Studio 2022 and MSTest.
 
-Phase 1 provides the foundation only:
+Current Phase 2 scope provides:
 
 - `Mock.Of<T>()` for interface mocks
 - `DispatchProxy` based interface proxying
 - internal invocation recording
 - lenient default return values for unstubbed calls
 - base exception and core model types
+- `When(...).ThenReturn(...)`
+- `When(...).ThenThrow(...)`
+- `When(...).ThenAnswer(...)`
+- `When(...).ThenReturnSequence(...)`
+- basic argument matchers: `Any`, `Eq`, `Is`, `Null`, `NotNull`, `InRange`
 
-The following features are intentionally not implemented in Phase 1:
+The following features are intentionally not implemented yet:
 
-- `When` / `ThenReturn` / `ThenThrow` / `ThenAnswer`
 - `Verify`
-- concrete argument matchers
 - captors
 - spies
 - in-order verification
@@ -25,7 +28,12 @@ The following features are intentionally not implemented in Phase 1:
 ## Example
 
 ```csharp
+using static MiniMockito.Mock;
+
 var service = Mock.Of<IMyService>();
+
+When(() => service.GetName(Any<int>()))
+    .ThenReturn("abc");
 
 var name = service.GetName(123);
 ```
