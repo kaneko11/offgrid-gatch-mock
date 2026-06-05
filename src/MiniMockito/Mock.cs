@@ -1,6 +1,8 @@
 using MiniMockito.Core;
 using MiniMockito.Exceptions;
+using MiniMockito.Stubbing;
 using MiniMockito.Proxy;
+using System.Linq.Expressions;
 using System.Reflection;
 
 namespace MiniMockito;
@@ -27,5 +29,48 @@ public static class Mock
         MockRepository.Default.Register((object)proxy, state);
 
         return proxy;
+    }
+
+    public static StubBuilder<TResult> When<TResult>(Expression<Func<TResult>> invocation)
+    {
+        var setup = InvocationSetupFactory.Create(invocation.Body);
+        return new StubBuilder<TResult>(setup.State, setup.Matcher, setup.ReturnType);
+    }
+
+    public static StubBuilder When(Expression<Action> invocation)
+    {
+        var setup = InvocationSetupFactory.Create(invocation.Body);
+        return new StubBuilder(setup.State, setup.Matcher, setup.ReturnType);
+    }
+
+    public static T Any<T>()
+    {
+        return default!;
+    }
+
+    public static T Eq<T>(T value)
+    {
+        return default!;
+    }
+
+    public static T Is<T>(Expression<Func<T, bool>> predicate)
+    {
+        return default!;
+    }
+
+    public static T? Null<T>()
+    {
+        return default;
+    }
+
+    public static T NotNull<T>()
+    {
+        return default!;
+    }
+
+    public static T InRange<T>(T min, T max)
+        where T : IComparable<T>
+    {
+        return default!;
     }
 }

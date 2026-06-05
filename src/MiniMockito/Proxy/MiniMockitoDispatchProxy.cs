@@ -30,7 +30,11 @@ internal class MiniMockitoDispatchProxy : DispatchProxy, IMockProxy
 
         try
         {
-            var returnValue = DefaultValueProvider.GetDefaultValue(targetMethod.ReturnType);
+            var stubRule = _state.FindStubRule(targetMethod, args);
+            var returnValue = stubRule is not null
+                ? stubRule.Invoke(invocation, targetMethod.ReturnType)
+                : DefaultValueProvider.GetDefaultValue(targetMethod.ReturnType);
+
             invocation.ReturnValue = returnValue;
             return returnValue;
         }
