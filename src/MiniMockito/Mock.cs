@@ -2,6 +2,7 @@ using MiniMockito.Core;
 using MiniMockito.Exceptions;
 using MiniMockito.Stubbing;
 using MiniMockito.Proxy;
+using MiniMockito.Proxy.ClassProxy;
 using MiniMockito.Verification;
 using System.Linq.Expressions;
 using System.Reflection;
@@ -60,6 +61,53 @@ public static class Mock
     public static T Of<T>(Core.MockBehavior behavior)
     {
         return Of<T>(behavior == Core.MockBehavior.Strict ? MockBehavior.Strict : MockBehavior.Lenient);
+    }
+
+    /// <summary>
+    /// Creates a lenient class mock for a public non-sealed class with a parameterless constructor.
+    /// </summary>
+    /// <typeparam name="T">The class type to mock.</typeparam>
+    /// <returns>A generated class proxy instance.</returns>
+    public static T Class<T>()
+        where T : class
+    {
+        return Class<T>(MockBehavior.Lenient);
+    }
+
+    /// <summary>
+    /// Creates a class mock for a public non-sealed class with a parameterless constructor.
+    /// </summary>
+    /// <typeparam name="T">The class type to mock.</typeparam>
+    /// <param name="behavior">The behavior to use for unstubbed virtual method invocations.</param>
+    /// <returns>A generated class proxy instance.</returns>
+    public static T Class<T>(MockBehavior behavior)
+        where T : class
+    {
+        return Class<T>(new ClassMockOptions(behavior));
+    }
+
+    /// <summary>
+    /// Creates a class mock using class proxy options.
+    /// </summary>
+    /// <typeparam name="T">The class type to mock.</typeparam>
+    /// <param name="options">The class proxy options.</param>
+    /// <returns>A generated class proxy instance.</returns>
+    public static T Class<T>(ClassMockOptions options)
+        where T : class
+    {
+        return ClassProxyFactory.Default.Create<T>(options);
+    }
+
+    /// <summary>
+    /// Creates a class mock using the legacy <see cref="Core.MockBehavior"/> enum.
+    /// </summary>
+    /// <typeparam name="T">The class type to mock.</typeparam>
+    /// <param name="behavior">The legacy behavior value.</param>
+    /// <returns>A generated class proxy instance.</returns>
+    public static T Class<T>(Core.MockBehavior behavior)
+        where T : class
+    {
+        return Class<T>(behavior == Core.MockBehavior.Strict ? MockBehavior.Strict : MockBehavior.Lenient);
     }
 
     /// <summary>

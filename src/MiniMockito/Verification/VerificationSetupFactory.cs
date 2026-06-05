@@ -2,6 +2,7 @@ using System.Linq.Expressions;
 using MiniMockito.Core;
 using MiniMockito.Exceptions;
 using MiniMockito.Matching;
+using MiniMockito.Proxy.ClassProxy;
 
 namespace MiniMockito.Verification;
 
@@ -21,6 +22,7 @@ internal static class VerificationSetupFactory
             ?? throw new VerificationException("Verify could not evaluate the mock instance.");
 
         var state = MockRepository.Default.GetState(mock);
+        ClassProxyValidation.EnsureMethodSupported(state.MockedType, methodCall.Method);
         var matchers = methodCall.Arguments
             .Select(CreateArgumentMatcher)
             .ToArray();
