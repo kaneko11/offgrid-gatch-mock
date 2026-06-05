@@ -35,4 +35,6 @@ public sealed class InvocationRecord
     public Exception? Exception { get; internal set; }
 
     public int ThreadId { get; }
+
+    public bool IsVerified { get; internal set; }
 }
