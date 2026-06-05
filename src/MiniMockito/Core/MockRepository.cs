@@ -10,7 +10,7 @@ internal sealed class MockRepository
 
     public static MockRepository Default { get; } = new();
 
-    internal MockState CreateState(Type mockedType, MockBehavior behavior, object? realInstance = null)
+    internal MockState CreateState(Type mockedType, global::MiniMockito.MockBehavior behavior, object? realInstance = null)
     {
         return new MockState(mockedType, behavior, realInstance);
     }
@@ -22,6 +22,8 @@ internal sealed class MockRepository
 
     internal MockState GetState(object mock)
     {
+        ArgumentNullException.ThrowIfNull(mock);
+
         if (_states.TryGetValue(mock, out var state))
         {
             return state;

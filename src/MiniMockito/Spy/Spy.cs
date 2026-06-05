@@ -5,8 +5,17 @@ using MiniMockito.Proxy;
 
 namespace MiniMockito;
 
+/// <summary>
+/// Provides the public API for creating interface spies.
+/// </summary>
 public static class Spy
 {
+    /// <summary>
+    /// Creates an interface spy that delegates unstubbed invocations to <paramref name="realInstance"/>.
+    /// </summary>
+    /// <typeparam name="T">The interface type to spy.</typeparam>
+    /// <param name="realInstance">The real instance implementing <typeparamref name="T"/>.</param>
+    /// <returns>A proxy implementing <typeparamref name="T"/>.</returns>
     public static T Of<T>(T realInstance)
     {
         var targetType = typeof(T);

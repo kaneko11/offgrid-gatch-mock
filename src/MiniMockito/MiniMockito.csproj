@@ -6,5 +6,21 @@
     <ImplicitUsings>enable</ImplicitUsings>
     <AssemblyName>MiniMockito</AssemblyName>
     <RootNamespace>MiniMockito</RootNamespace>
+    <PackageId>MiniMockito.Net</PackageId>
+    <Version>0.1.0</Version>
+    <Authors>MiniMockito.Net contributors</Authors>
+    <Company>MiniMockito.Net contributors</Company>
+    <Description>A lightweight interface-first mocking framework for .NET and MSTest.</Description>
+    <PackageTags>mocking;testing;mstest;dispatchproxy;mockito</PackageTags>
+    <PackageLicenseExpression>MIT</PackageLicenseExpression>
+    <PackageReadmeFile>README.md</PackageReadmeFile>
+    <RepositoryType>git</RepositoryType>
+    <GenerateDocumentationFile>true</GenerateDocumentationFile>
+    <IncludeSymbols>true</IncludeSymbols>
+    <SymbolPackageFormat>snupkg</SymbolPackageFormat>
   </PropertyGroup>
+
+  <ItemGroup>
+    <None Include="..\..\README.md" Pack="true" PackagePath="\" />
+  </ItemGroup>
 </Project>

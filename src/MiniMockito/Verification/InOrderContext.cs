@@ -5,6 +5,9 @@ using MiniMockito.Verification;
 
 namespace MiniMockito;
 
+/// <summary>
+/// Verifies invocation order across one or more mocks or spies.
+/// </summary>
 public sealed class InOrderContext
 {
     private readonly IReadOnlyList<MockState> _states;
@@ -26,14 +29,25 @@ public sealed class InOrderContext
         }
     }
 
+    /// <summary>
+    /// Verifies that a void invocation happened after the previously verified in-order invocation.
+    /// </summary>
+    /// <param name="invocation">The expected invocation expression.</param>
     public void Verify(Expression<Action> invocation)
     {
+        ArgumentNullException.ThrowIfNull(invocation);
         var setup = VerificationSetupFactory.Create(invocation.Body);
         Verify(setup);
     }
 
+    /// <summary>
+    /// Verifies that a non-void invocation happened after the previously verified in-order invocation.
+    /// </summary>
+    /// <typeparam name="TResult">The invocation return type.</typeparam>
+    /// <param name="invocation">The expected invocation expression.</param>
     public void Verify<TResult>(Expression<Func<TResult>> invocation)
     {
+        ArgumentNullException.ThrowIfNull(invocation);
         var setup = VerificationSetupFactory.Create(invocation.Body);
         Verify(setup);
     }
