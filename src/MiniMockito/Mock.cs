@@ -120,4 +120,9 @@ public static class Mock
         var state = MockRepository.Default.GetState(mock);
         VerificationEngine.VerifyNoMoreInteractions(state);
     }
+
+    public static InOrderContext InOrder(params object[] mocks)
+    {
+        return new InOrderContext(mocks);
+    }
 }

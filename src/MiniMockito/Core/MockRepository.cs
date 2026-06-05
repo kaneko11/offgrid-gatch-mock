@@ -10,9 +10,9 @@ internal sealed class MockRepository
 
     public static MockRepository Default { get; } = new();
 
-    internal MockState CreateState(Type mockedType, MockBehavior behavior)
+    internal MockState CreateState(Type mockedType, MockBehavior behavior, object? realInstance = null)
     {
-        return new MockState(mockedType, behavior);
+        return new MockState(mockedType, behavior, realInstance);
     }
 
     internal void Register(object proxy, MockState state)
