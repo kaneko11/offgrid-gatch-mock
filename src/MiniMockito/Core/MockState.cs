@@ -77,4 +77,49 @@ internal sealed class MockState
 
         return null;
     }
+
+    internal IReadOnlyList<InvocationRecord> FindInvocations(InvocationMatcher matcher)
+    {
+        lock (_syncRoot)
+        {
+            return _invocations
+                .Where(invocation => matcher.Matches(invocation))
+                .ToArray();
+        }
+    }
+
+    internal void MarkVerified(IEnumerable<InvocationRecord> invocations)
+    {
+        lock (_syncRoot)
+        {
+            foreach (var invocation in invocations)
+            {
+                invocation.IsVerified = true;
+            }
+        }
+    }
+
+    internal IReadOnlyList<InvocationRecord> GetUnverifiedInvocations()
+    {
+        lock (_syncRoot)
+        {
+            return _invocations
+                .Where(invocation => !invocation.IsVerified)
+                .ToArray();
+        }
+    }
+
+    internal IReadOnlyList<string> DescribeStubCandidates(MethodInfo? method = null)
+    {
+        lock (_syncRoot)
+        {
+            var candidates = method is null
+                ? _stubRules
+                : _stubRules.Where(rule => Equals(rule.Matcher.Method, method));
+
+            return candidates
+                .Select(rule => rule.Describe())
+                .ToArray();
+        }
+    }
 }

@@ -25,4 +25,9 @@ internal sealed class StubRule
         var context = new StubContext(invocation.MockId, invocation.Method, invocation.Arguments);
         return Behavior.Invoke(context, returnType);
     }
+
+    internal string Describe()
+    {
+        return Matcher.Describe();
+    }
 }

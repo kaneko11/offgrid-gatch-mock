@@ -37,4 +37,20 @@ public sealed class InvocationMatcher
 
         return true;
     }
+
+    internal void CaptureArguments(IReadOnlyList<object?> arguments)
+    {
+        for (var index = 0; index < ArgumentMatchers.Count && index < arguments.Count; index++)
+        {
+            if (ArgumentMatchers[index] is ICapturingArgumentMatcher capturingMatcher)
+            {
+                capturingMatcher.Capture(arguments[index]);
+            }
+        }
+    }
+
+    internal string Describe()
+    {
+        return $"{Method.Name}({string.Join(", ", ArgumentMatchers.Select(matcher => matcher.Describe()))})";
+    }
 }
