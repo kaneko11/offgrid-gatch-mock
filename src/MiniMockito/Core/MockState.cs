@@ -9,7 +9,7 @@ internal sealed class MockState
     private readonly List<StubRule> _stubRules = [];
     private readonly object _syncRoot = new();
 
-    internal MockState(Type mockedType, MockBehavior behavior, object? realInstance = null)
+    internal MockState(Type mockedType, global::MiniMockito.MockBehavior behavior, object? realInstance = null)
     {
         MockedType = mockedType;
         Behavior = behavior;
@@ -20,7 +20,7 @@ internal sealed class MockState
 
     public Type MockedType { get; }
 
-    public MockBehavior Behavior { get; }
+    public global::MiniMockito.MockBehavior Behavior { get; }
 
     internal object? RealInstance { get; }
 

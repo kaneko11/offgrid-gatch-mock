@@ -42,7 +42,7 @@ internal class MiniMockitoDispatchProxy : DispatchProxy, IMockProxy
             {
                 returnValue = InvokeRealInstance(_state.RealInstance, targetMethod, args);
             }
-            else if (_state.Behavior == MockBehavior.Strict)
+            else if (_state.Behavior == global::MiniMockito.MockBehavior.Strict)
             {
                 throw new MockException(StrictMockMessageFormatter.Format(_state, targetMethod, args));
             }

@@ -8,6 +8,7 @@ internal sealed class ReturnBehavior : StubBehavior
 
     internal ReturnBehavior(IEnumerable<object?> values)
     {
+        ArgumentNullException.ThrowIfNull(values);
         _values = values.ToArray();
         if (_values.Length == 0)
         {
