@@ -1,4 +1,5 @@
 using System.Reflection;
+using System.Runtime.ExceptionServices;
 using MiniMockito.Core;
 using MiniMockito.Exceptions;
 using MiniMockito.Utilities;
@@ -32,14 +33,23 @@ internal class MiniMockitoDispatchProxy : DispatchProxy, IMockProxy
         try
         {
             var stubRule = _state.FindStubRule(targetMethod, args);
-            if (stubRule is null && _state.Behavior == MockBehavior.Strict)
+            object? returnValue;
+            if (stubRule is not null)
+            {
+                returnValue = stubRule.Invoke(invocation, targetMethod.ReturnType);
+            }
+            else if (_state.RealInstance is not null)
+            {
+                returnValue = InvokeRealInstance(_state.RealInstance, targetMethod, args);
+            }
+            else if (_state.Behavior == MockBehavior.Strict)
             {
                 throw new MockException(StrictMockMessageFormatter.Format(_state, targetMethod, args));
             }
-
-            var returnValue = stubRule is not null
-                ? stubRule.Invoke(invocation, targetMethod.ReturnType)
-                : DefaultValueProvider.GetDefaultValue(targetMethod.ReturnType);
+            else
+            {
+                returnValue = DefaultValueProvider.GetDefaultValue(targetMethod.ReturnType);
+            }
 
             invocation.ReturnValue = returnValue;
             return returnValue;
@@ -47,6 +57,19 @@ internal class MiniMockitoDispatchProxy : DispatchProxy, IMockProxy
         catch (Exception exception)
         {
             invocation.Exception = exception;
+            throw;
+        }
+    }
+
+    private static object? InvokeRealInstance(object realInstance, MethodInfo targetMethod, object?[]? args)
+    {
+        try
+        {
+            return targetMethod.Invoke(realInstance, args);
+        }
+        catch (TargetInvocationException exception) when (exception.InnerException is not null)
+        {
+            ExceptionDispatchInfo.Capture(exception.InnerException).Throw();
             throw;
         }
     }
