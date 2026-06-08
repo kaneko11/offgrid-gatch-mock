@@ -712,3 +712,50 @@ PoC 対象:
 
 最後の報告は日本語でお願いします。
 ```
+
+## 15. Phase 4 newobj rewrite PoC update
+
+Phase 4 adds the first limited assembly rewrite PoC inside `MiniMockito.Shims.Experimental`.
+The implementation remains outside the main `MiniMockito` package and is intended only for a dedicated sample assembly.
+
+Implemented scope:
+
+- input: dedicated user assembly
+- target: allowlisted public non-generic class
+- constructor: public parameterless constructor
+- pattern: simple `new Target()` compiled to `newobj Target::.ctor()`
+- output: rewritten assembly copied to a separate path
+- original assembly: never overwritten
+- replacement: `call !!0 ShimDispatcher::New<Target>()`
+
+Mono.Cecil is used in Phase 4 because this phase must write IL and metadata, not only inspect IL.
+The Phase 3 dry-run scanner remains reflection-based because it only reports candidate call sites.
+Alternatives considered:
+
+- `System.Reflection`: useful for dry-run inspection, but cannot save rewritten method bodies.
+- `System.Reflection.Metadata`: lower-level and viable, but would require substantially more writer code for this PoC.
+- Mono.Cecil: focused on managed assembly read/write and keeps the PoC small enough to verify with MSTest.
+
+Dependency impact:
+
+- `MiniMockito.Shims.Experimental` now depends on `Mono.Cecil`.
+- The dependency is isolated to the experimental shims package.
+- `MiniMockito` main package still has no dependency on Mono.Cecil and no shim rewrite API.
+
+The Phase 4 test loader uses a dedicated `AssemblyLoadContext` and resolves `MiniMockito.Shims.Experimental`
+back to the already loaded test assembly dependency so `ShimContext` and `ShimDispatcher` share the same rule registry.
+
+Still unsupported in Phase 4:
+
+- in-place production assembly rewrite
+- BCL type replacement
+- static method mocking
+- sealed or non-virtual method body interception
+- constructor arguments
+- generic target classes
+- generic constructors
+- runtime IL rewrite
+- CLR Profiling API
+- detour or method patching
+- Visual Studio Test Explorer full integration
+- parallel test safety guarantee

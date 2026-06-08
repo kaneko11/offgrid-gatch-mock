@@ -16,5 +16,6 @@
 
   <ItemGroup>
     <ProjectReference Include="..\..\src\MiniMockito.Shims.Experimental\MiniMockito.Shims.Experimental.csproj" />
+    <ProjectReference Include="..\MiniMockito.Shims.Experimental.Sample\MiniMockito.Shims.Experimental.Sample.csproj" />
   </ItemGroup>
 </Project>
