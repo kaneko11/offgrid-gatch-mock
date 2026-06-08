@@ -17,6 +17,7 @@ public static class Mock
     /// <summary>
     /// Creates a lenient mock for the interface type <typeparamref name="T"/>.
     /// </summary>
+    /// <remarks>Use <c>Mock.Class&lt;T&gt;()</c> for public non-sealed class proxies.</remarks>
     /// <typeparam name="T">The interface type to mock.</typeparam>
     /// <returns>A proxy implementing <typeparamref name="T"/>.</returns>
     public static T Of<T>()
@@ -27,6 +28,7 @@ public static class Mock
     /// <summary>
     /// Creates a mock for the interface type <typeparamref name="T"/> with the specified behavior.
     /// </summary>
+    /// <remarks>Only interfaces are supported by this API.</remarks>
     /// <typeparam name="T">The interface type to mock.</typeparam>
     /// <param name="behavior">The behavior to use for unstubbed invocations.</param>
     /// <returns>A proxy implementing <typeparamref name="T"/>.</returns>
@@ -66,6 +68,10 @@ public static class Mock
     /// <summary>
     /// Creates a lenient class mock for a public non-sealed class with a parameterless constructor.
     /// </summary>
+    /// <remarks>
+    /// Class proxies intercept public virtual methods only. Sealed classes, static methods,
+    /// non-virtual methods, private methods, constructors, and direct <c>new</c> interception are not supported.
+    /// </remarks>
     /// <typeparam name="T">The class type to mock.</typeparam>
     /// <returns>A generated class proxy instance.</returns>
     public static T Class<T>()
@@ -77,6 +83,10 @@ public static class Mock
     /// <summary>
     /// Creates a class mock for a public non-sealed class with a parameterless constructor.
     /// </summary>
+    /// <remarks>
+    /// Class proxies intercept public virtual methods only. Sealed classes, static methods,
+    /// non-virtual methods, private methods, constructors, and direct <c>new</c> interception are not supported.
+    /// </remarks>
     /// <typeparam name="T">The class type to mock.</typeparam>
     /// <param name="behavior">The behavior to use for unstubbed virtual method invocations.</param>
     /// <returns>A generated class proxy instance.</returns>
@@ -89,6 +99,10 @@ public static class Mock
     /// <summary>
     /// Creates a class mock using class proxy options.
     /// </summary>
+    /// <remarks>
+    /// Use <see cref="ClassMockOptions.CallBase"/> to create a partial mock that calls base implementations
+    /// for unstubbed public virtual method invocations.
+    /// </remarks>
     /// <typeparam name="T">The class type to mock.</typeparam>
     /// <param name="options">The class proxy options.</param>
     /// <returns>A generated class proxy instance.</returns>
