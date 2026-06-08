@@ -1,4 +1,5 @@
 using System.Reflection;
+using System.Runtime.ExceptionServices;
 using MiniMockito.Core;
 using MiniMockito.Exceptions;
 using MiniMockito.Utilities;
@@ -17,12 +18,14 @@ public static class ClassProxyInvocationDispatcher
     /// <param name="proxy">The generated proxy instance.</param>
     /// <param name="targetMethod">The original target method.</param>
     /// <param name="args">The invocation arguments.</param>
+    /// <param name="baseInvokerName">The generated private method that calls the base implementation.</param>
     /// <returns>The return value to pass back to the generated override.</returns>
-    public static object? Invoke(object proxy, MethodInfo targetMethod, object?[] args)
+    public static object? Invoke(object proxy, MethodInfo targetMethod, object?[] args, string baseInvokerName)
     {
         ArgumentNullException.ThrowIfNull(proxy);
         ArgumentNullException.ThrowIfNull(targetMethod);
         ArgumentNullException.ThrowIfNull(args);
+        ArgumentException.ThrowIfNullOrWhiteSpace(baseInvokerName);
 
         MockState state;
         try
@@ -47,6 +50,10 @@ public static class ClassProxyInvocationDispatcher
             {
                 returnValue = stubRule.Invoke(invocation, targetMethod.ReturnType);
             }
+            else if (state.CallsBase)
+            {
+                returnValue = InvokeBase(proxy, baseInvokerName, args);
+            }
             else if (state.Behavior == MockBehavior.Strict)
             {
                 throw CreateStrictException(state, targetMethod, args);
@@ -62,6 +69,34 @@ public static class ClassProxyInvocationDispatcher
         catch (Exception exception)
         {
             invocation.Exception = exception;
+            throw;
+        }
+    }
+
+    private static object? InvokeBase(object proxy, string baseInvokerName, object?[] args)
+    {
+        var baseInvoker = proxy
+            .GetType()
+            .GetMethod(baseInvokerName, BindingFlags.Instance | BindingFlags.NonPublic)
+            ?? throw new ClassProxyException(string.Join(
+                Environment.NewLine,
+                "Class proxy base invocation failed.",
+                $"Target class: {proxy.GetType().BaseType?.FullName}",
+                $"Method: {baseInvokerName}",
+                "Reason: Base invoker method was not found.",
+                "Supported methods:",
+                "  <unknown>",
+                "Unsupported methods:",
+                "  <unknown>",
+                "Hint: Recreate the class proxy and report this as a MiniMockito class proxy generation bug."));
+
+        try
+        {
+            return baseInvoker.Invoke(proxy, [args]);
+        }
+        catch (TargetInvocationException exception) when (exception.InnerException is not null)
+        {
+            ExceptionDispatchInfo.Capture(exception.InnerException).Throw();
             throw;
         }
     }

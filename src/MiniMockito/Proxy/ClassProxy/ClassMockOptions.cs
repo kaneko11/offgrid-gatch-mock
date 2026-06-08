@@ -16,6 +16,14 @@ public sealed class ClassMockOptions
     public static ClassMockOptions Strict { get; } = new(MockBehavior.Strict);
 
     /// <summary>
+    /// Gets an option set that calls base implementations for unstubbed virtual method invocations.
+    /// </summary>
+    public static ClassMockOptions CallBase { get; } = new()
+    {
+        CallsBase = true
+    };
+
+    /// <summary>
     /// Initializes a new lenient class mock option set.
     /// </summary>
     public ClassMockOptions()
@@ -35,4 +43,9 @@ public sealed class ClassMockOptions
     /// Gets or initializes the behavior for unstubbed invocations.
     /// </summary>
     public MockBehavior Behavior { get; init; } = MockBehavior.Lenient;
+
+    /// <summary>
+    /// Gets or initializes whether unstubbed virtual method invocations should call the base implementation.
+    /// </summary>
+    public bool CallsBase { get; init; }
 }

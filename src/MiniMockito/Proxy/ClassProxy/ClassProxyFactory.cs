@@ -24,7 +24,7 @@ internal sealed class ClassProxyFactory
                 ClassProxyUnsupportedReason.NoParameterlessConstructor,
                 hint: "The generated proxy could not be instantiated."));
 
-        var state = MockRepository.Default.CreateState(targetType, options.Behavior);
+        var state = MockRepository.Default.CreateState(targetType, options.Behavior, callsBase: options.CallsBase);
         MockRepository.Default.Register(proxy, state);
 
         return proxy;

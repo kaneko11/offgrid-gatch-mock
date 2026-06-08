@@ -2,6 +2,7 @@ using System.Reflection;
 using MiniMockito.Core;
 using MiniMockito.Exceptions;
 using MiniMockito.Proxy;
+using MiniMockito.Proxy.ClassProxy;
 
 namespace MiniMockito;
 
@@ -10,6 +11,17 @@ namespace MiniMockito;
 /// </summary>
 public static class Spy
 {
+    /// <summary>
+    /// Creates a class spy that calls base implementations for unstubbed public virtual method invocations.
+    /// </summary>
+    /// <typeparam name="T">The public non-sealed class type to spy.</typeparam>
+    /// <returns>A generated class proxy instance.</returns>
+    public static T Class<T>()
+        where T : class
+    {
+        return ClassProxyFactory.Default.Create<T>(ClassMockOptions.CallBase);
+    }
+
     /// <summary>
     /// Creates an interface spy that delegates unstubbed invocations to <paramref name="realInstance"/>.
     /// </summary>

@@ -10,9 +10,9 @@ internal sealed class MockRepository
 
     public static MockRepository Default { get; } = new();
 
-    internal MockState CreateState(Type mockedType, global::MiniMockito.MockBehavior behavior, object? realInstance = null)
+    internal MockState CreateState(Type mockedType, global::MiniMockito.MockBehavior behavior, object? realInstance = null, bool callsBase = false)
     {
-        return new MockState(mockedType, behavior, realInstance);
+        return new MockState(mockedType, behavior, realInstance, callsBase);
     }
 
     internal void Register(object proxy, MockState state)
