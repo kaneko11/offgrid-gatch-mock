@@ -510,7 +510,96 @@ CI:
 - shims experimental は dedicated CI job にする
 - Phase 2 では shims job を optional 扱いにするか、最小 PoC のみに限定する
 
-## 11. リスク
+## 11. Phase 3 dry-run scanner 設計
+
+Phase 3 では assembly の実際の書き換えは行わず、対象 assembly を読み取って `newobj` call site の候補だけを report します。
+
+追加するモデル:
+
+- `RewritePlan`
+  - scan 対象 assembly path
+  - allowlist された `RewriteTarget`
+- `RewriteTarget`
+  - allowlist の target type
+  - Phase 3 では `Type` ベースで指定する
+- `RewriteReport`
+  - scan 対象 assembly
+  - allowlist target
+  - `NewObjScanResult`
+- `AssemblyRewriteScanner`
+  - dry-run scan の入口
+  - IL の読み取りだけを行う
+- `NewObjCallSite`
+  - target type
+  - target constructor
+  - calling type
+  - calling method
+  - IL offset
+  - supported / unsupported
+  - unsupported reason
+- `NewObjScanOptions`
+  - allowlist target types
+- `NewObjScanResult`
+  - detected call sites
+  - supported call sites
+  - unsupported call sites
+
+Phase 3 の scan 方針:
+
+- `MethodBody.GetILAsByteArray()` で method body の IL byte sequence を取得する
+- `System.Reflection.Emit.OpCodes` の metadata から opcode table を作る
+- `OpCodes.Newobj` の operand metadata token を `Module.ResolveMethod(...)` で `ConstructorInfo` に解決する
+- allowlist に含まれる target type の call site だけ report する
+- support 判定は report 上の分類に留め、IL は変更しない
+
+Phase 3 の supported pattern:
+
+- user assembly 内の target type
+- public class
+- non-generic class
+- public parameterless constructor
+- allowlist で指定された target type
+- simple `newobj`
+
+Phase 3 の unsupported pattern:
+
+- BCL / .NET runtime type
+- non-public target type
+- generic type
+- constructor arguments
+- non-public constructor
+- value type / interface / abstract type
+
+Mono.Cecil などの IL inspection library は Phase 3 では追加しません。
+
+理由:
+
+- dry-run scanner は `newobj` 検出だけが目的で、`System.Reflection` と `MethodBody.GetILAsByteArray()` で足りる
+- 依存追加なしで build / CI / NuGet metadata への影響を小さくできる
+- Phase 4 以降で実際の assembly rewrite、PDB handling、metadata 書き換えが必要になった時点で Mono.Cecil 等を再検討するほうが妥当
+
+代替案:
+
+- Mono.Cecil
+  - IL と metadata の読み書きに強い
+  - Phase 4 以降の rewrite 実装では有力
+  - 依存 package と license / version 管理が必要
+- `System.Reflection.Metadata`
+  - 低レベルで読み取りに強い
+  - 書き換えには追加実装が重くなる
+- `System.Reflection`
+  - Phase 3 の読み取り dry-run には十分
+  - assembly load context に assembly を読み込むため、完全な offline inspection ではない
+
+Phase 3 の制約:
+
+- assembly は実際には書き換えない
+- rewritten assembly は出力しない
+- call site の置換可能性は report の supported flag で示すだけ
+- scanner は assembly を load するため、untrusted assembly の scan には使わない
+- BCL type、constructor arguments、generic type は unsupported として report する
+
+## 12. リスク
 
 主なリスク:
 
@@ -530,9 +619,9 @@ CI:
 - dedicated sample / test project に限定する
 - parallel disabled を明記する
 - unsupported pattern は fail-fast する
-- Phase 2 では BCL / constructor args / generic / async state machine complex case に手を出さない
+- Phase 2 / Phase 3 では BCL / constructor args / generic / async state machine complex case に手を出さない
 
-## 12. 採用しない方式と理由
+## 13. 採用しない方式と理由
 
 Phase 2 で採用しない:
 
@@ -561,7 +650,7 @@ Phase 2 で採用する:
   - rewrite report を作りやすい
   - MSTest と CI で段階的に検証しやすい
 
-## 13. Phase 2 用の実装プロンプト案
+## 14. Phase 2 用の実装プロンプト案
 
 ```markdown
 AGENTS.md、AGENTS.shims-experimental.md、docs/v2-shims-experimental-design.md、docs/shims-new-interception-design.md を読んでください。
