@@ -1,0 +1,18 @@
+<Project Sdk="Microsoft.NET.Sdk">
+  <PropertyGroup>
+    <TargetFramework>net8.0</TargetFramework>
+    <LangVersion>latest</LangVersion>
+    <Nullable>enable</Nullable>
+    <ImplicitUsings>enable</ImplicitUsings>
+    <AssemblyName>MiniMockito.Shims.Experimental</AssemblyName>
+    <RootNamespace>MiniMockito.Shims.Experimental</RootNamespace>
+    <PackageId>MiniMockito.Shims.Experimental</PackageId>
+    <Title>MiniMockito.Shims.Experimental</Title>
+    <Version>0.1.0-alpha.2</Version>
+    <Authors>MiniMockito.Net contributors</Authors>
+    <Description>Experimental shim infrastructure for MiniMockito.Net. This package is not stable and currently provides only new-interception skeleton APIs.</Description>
+    <PackageTags>mocking;testing;mstest;shims;experimental</PackageTags>
+    <RepositoryType>git</RepositoryType>
+    <GenerateDocumentationFile>true</GenerateDocumentationFile>
+  </PropertyGroup>
+</Project>
