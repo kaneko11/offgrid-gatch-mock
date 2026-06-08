@@ -15,8 +15,8 @@
     <PackageTags>mocking;testing;mstest;dispatchproxy;class-proxy;mockito</PackageTags>
     <PackageLicenseExpression>MIT</PackageLicenseExpression>
     <PackageReadmeFile>README.md</PackageReadmeFile>
-    <PackageProjectUrl>https://github.com/example/MiniMockito.Net</PackageProjectUrl>
-    <RepositoryUrl>https://github.com/example/MiniMockito.Net</RepositoryUrl>
+    <PackageProjectUrl>https://github.com/kaneko11/offgrid-gatch-mock</PackageProjectUrl>
+    <RepositoryUrl>https://github.com/kaneko11/offgrid-gatch-mock</RepositoryUrl>
     <RepositoryType>git</RepositoryType>
     <GenerateDocumentationFile>true</GenerateDocumentationFile>
     <IncludeSymbols>true</IncludeSymbols>
