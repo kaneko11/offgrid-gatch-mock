@@ -9,11 +9,12 @@ internal sealed class MockState
     private readonly List<StubRule> _stubRules = [];
     private readonly object _syncRoot = new();
 
-    internal MockState(Type mockedType, global::MiniMockito.MockBehavior behavior, object? realInstance = null)
+    internal MockState(Type mockedType, global::MiniMockito.MockBehavior behavior, object? realInstance = null, bool callsBase = false)
     {
         MockedType = mockedType;
         Behavior = behavior;
         RealInstance = realInstance;
+        CallsBase = callsBase;
     }
 
     public Guid MockId { get; } = Guid.NewGuid();
@@ -25,6 +26,8 @@ internal sealed class MockState
     internal object? RealInstance { get; }
 
     internal bool IsSpy => RealInstance is not null;
+
+    internal bool CallsBase { get; }
 
     public IReadOnlyList<InvocationRecord> Invocations
     {
