@@ -7,13 +7,17 @@ using MiniMockito.Proxy.ClassProxy;
 namespace MiniMockito;
 
 /// <summary>
-/// Provides the public API for creating interface spies.
+/// Provides the public API for creating spies.
 /// </summary>
 public static class Spy
 {
     /// <summary>
     /// Creates a class spy that calls base implementations for unstubbed public virtual method invocations.
     /// </summary>
+    /// <remarks>
+    /// Class spies use the same class proxy constraints as <c>Mock.Class&lt;T&gt;()</c>: the target must be a public
+    /// non-sealed class with a public or protected parameterless constructor, and only public virtual methods are intercepted.
+    /// </remarks>
     /// <typeparam name="T">The public non-sealed class type to spy.</typeparam>
     /// <returns>A generated class proxy instance.</returns>
     public static T Class<T>()
@@ -25,6 +29,7 @@ public static class Spy
     /// <summary>
     /// Creates an interface spy that delegates unstubbed invocations to <paramref name="realInstance"/>.
     /// </summary>
+    /// <remarks>Interface spies remain interface proxies. Class proxying is available through <c>Spy.Class&lt;T&gt;()</c>.</remarks>
     /// <typeparam name="T">The interface type to spy.</typeparam>
     /// <param name="realInstance">The real instance implementing <typeparamref name="T"/>.</param>
     /// <returns>A proxy implementing <typeparamref name="T"/>.</returns>
