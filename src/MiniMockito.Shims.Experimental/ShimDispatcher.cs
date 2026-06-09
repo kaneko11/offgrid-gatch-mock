@@ -7,6 +7,9 @@ public static class ShimDispatcher
 {
     /// <summary>
     /// Creates a new instance of <typeparamref name="T"/> through the active shim rule, or by using a public parameterless constructor.
+    /// Rules registered without <c>WithArguments</c> (catch-all rules) and rules registered with an empty
+    /// <c>WithArguments()</c> call match parameterless constructor call sites.
+    /// Rules that require specific arguments do not match parameterless calls.
     /// </summary>
     public static T New<T>()
     {
@@ -14,7 +17,7 @@ public static class ShimDispatcher
         var context = ShimContext.Current;
 
         if (context is { IsDisposed: false } &&
-            context.Registry.TryFindNewRule(targetType, out var rule) &&
+            context.Registry.TryFindNewRuleWithArgs(targetType, [], out var rule) &&
             rule is not null)
         {
             return (T)rule.CreateInstance()!;
@@ -24,8 +27,11 @@ public static class ShimDispatcher
     }
 
     /// <summary>
-    /// Creates a new instance of <typeparamref name="T"/> through the active shim rule, or by using the matching public constructor.
+    /// Creates a new instance of <typeparamref name="T"/> through the best matching active shim rule,
+    /// or by using the matching public constructor as a fallback.
     /// Value-type arguments must be boxed by the caller (the rewritten wrapper method handles this automatically).
+    /// Rules are evaluated from most recently registered to least recently registered; the first rule
+    /// whose argument matchers all pass is selected.  A catch-all rule (no <c>WithArguments</c>) always matches.
     /// </summary>
     /// <param name="args">Boxed constructor arguments in declaration order.</param>
     public static T NewWithArgs<T>(object?[] args)
@@ -35,7 +41,7 @@ public static class ShimDispatcher
         var context = ShimContext.Current;
 
         if (context is { IsDisposed: false } &&
-            context.Registry.TryFindNewRule(targetType, out var rule) &&
+            context.Registry.TryFindNewRuleWithArgs(targetType, args, out var rule) &&
             rule is not null)
         {
             return (T)rule.CreateInstanceWithArgs(args)!;

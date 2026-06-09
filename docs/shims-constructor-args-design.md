@@ -747,3 +747,93 @@ Rewrite/
 
 `MiniMockito.Shims.Experimental` は `MiniMockito` 本体の `ArgumentMatcher<T>` を
 直接使用しません。shim 専用の `IShimArgumentMatcher` を定義します。
+
+---
+
+## Phase 8 実装ノート（WithArguments matcher API）
+
+> **Experimental.** このセクションの API は experimental です。将来のフェーズで変更される可能性があります。
+
+### 実装済み API
+
+#### `IShimArgumentMatcher` インターフェース
+
+```csharp
+public interface IShimArgumentMatcher
+{
+    Type? ExpectedType { get; }
+    bool Matches(object? value);
+    string Describe();
+}
+```
+
+#### `ShimArg` ファクトリ（フルネーム必須の現時点）
+
+```csharp
+// 任意の T 型値に一致
+ShimArg.Any<T>()
+
+// EqualityComparer<T>.Default で一致
+ShimArg.Eq<T>(T? value)
+
+// Predicate が true を返したら一致
+ShimArg.Is<T>(Func<T?, bool> predicate)
+```
+
+#### `NewShimBuilder<T>.WithArguments`
+
+```csharp
+Shim.New<UserRepository>()
+    .WithArguments(ShimArg.Any<string>())
+    .Returns(fakeRepository);
+
+Shim.New<UserRepository>()
+    .WithArguments(ShimArg.Eq("prod"))
+    .Returns(fakeRepository);
+
+Shim.New<UserRepository>()
+    .WithArguments(
+        ShimArg.Eq("prod"),
+        ShimArg.Any<int>())
+    .Returns(fakeRepository);
+```
+
+### 仕様一覧
+
+| 仕様項目 | 内容 |
+|---------|------|
+| `WithArguments` なし | catch-all rule。任意の引数リストに一致する |
+| `WithArguments()` 空配列 | 引数 count = 0 の場合のみ一致（parameterless constructor）|
+| 複数 rule が一致した場合 | 後から登録した rule を優先（Mockito 風「last stub wins」）|
+| `WithArguments` あり rule と catch-all rule が両方一致 | 登録順に従う。後から登録した rule を優先 |
+| no match 時 | 実 constructor fallback（`Activator.CreateInstance`）|
+| `Any<T>()` の null | reference type / `Nullable<T>` は null に一致。non-nullable value type は null に一致しない |
+| value type boxing | 生成ラッパーメソッド内で box してから dispatcher に渡す。matcher は `actual is T` / `EqualityComparer<T>` で unbox する |
+
+### 後から登録した rule が優先される理由
+
+Mockito の「後から書いた stub が前の stub を上書きする」感覚に合わせています。
+テストコードの後半に書かれた設定が「より具体的・最新の意図」を表すため、
+後から登録した rule が優先される方が読みやすいテストコードになります。
+
+### `WithArguments` を複数回呼んだ場合
+
+同一 builder オブジェクトに対して `WithArguments` を複数回呼んだ場合は、
+最後の呼び出しで上書きされます。
+
+```csharp
+Shim.New<Foo>()
+    .WithArguments(ShimArg.Eq("a"))  // 上書きされる
+    .WithArguments(ShimArg.Eq("b"))  // こちらが有効
+    .Returns(fake);
+```
+
+### 対象外
+
+- static method mocking
+- BCL type 差し替え
+- generic class / generic constructor
+- ref / out constructor arguments
+- params / optional parameter の高度対応
+- expression tree matcher
+- production assembly in-place rewrite

@@ -5,7 +5,7 @@ namespace MiniMockito.Shims.Experimental;
 /// </summary>
 public sealed class NewShimRule
 {
-    internal NewShimRule(Type targetType, Func<object?> factory, Guid contextId, long registrationOrder)
+    internal NewShimRule(Type targetType, Func<object?> factory, Guid contextId, long registrationOrder, IReadOnlyList<IShimArgumentMatcher>? matchers = null)
     {
         ArgumentNullException.ThrowIfNull(targetType);
         ArgumentNullException.ThrowIfNull(factory);
@@ -13,9 +13,10 @@ public sealed class NewShimRule
         Factory = factory;
         ContextId = contextId;
         RegistrationOrder = registrationOrder;
+        ArgumentMatchers = matchers;
     }
 
-    internal NewShimRule(Type targetType, Func<object?[], object?> argsFactory, Guid contextId, long registrationOrder)
+    internal NewShimRule(Type targetType, Func<object?[], object?> argsFactory, Guid contextId, long registrationOrder, IReadOnlyList<IShimArgumentMatcher>? matchers = null)
     {
         ArgumentNullException.ThrowIfNull(targetType);
         ArgumentNullException.ThrowIfNull(argsFactory);
@@ -23,9 +24,10 @@ public sealed class NewShimRule
         ArgsFactory = argsFactory;
         ContextId = contextId;
         RegistrationOrder = registrationOrder;
+        ArgumentMatchers = matchers;
     }
 
-    internal NewShimRule(Type targetType, Func<ShimConstructorContext, object?> contextFactory, Guid contextId, long registrationOrder)
+    internal NewShimRule(Type targetType, Func<ShimConstructorContext, object?> contextFactory, Guid contextId, long registrationOrder, IReadOnlyList<IShimArgumentMatcher>? matchers = null)
     {
         ArgumentNullException.ThrowIfNull(targetType);
         ArgumentNullException.ThrowIfNull(contextFactory);
@@ -33,6 +35,7 @@ public sealed class NewShimRule
         ContextFactory = contextFactory;
         ContextId = contextId;
         RegistrationOrder = registrationOrder;
+        ArgumentMatchers = matchers;
     }
 
     /// <summary>
@@ -64,6 +67,30 @@ public sealed class NewShimRule
     /// Gets the registration order within the owning context.
     /// </summary>
     public long RegistrationOrder { get; }
+
+    /// <summary>
+    /// Gets the optional argument matchers, or <see langword="null"/> for a catch-all rule.
+    /// A catch-all rule matches regardless of constructor arguments.
+    /// An empty list matches only when the argument count is zero (parameterless constructor).
+    /// </summary>
+    public IReadOnlyList<IShimArgumentMatcher>? ArgumentMatchers { get; }
+
+    /// <summary>
+    /// Returns <see langword="true"/> if <paramref name="args"/> satisfies this rule's argument matchers.
+    /// A rule with no matchers (<see cref="ArgumentMatchers"/> is <see langword="null"/>) is a catch-all
+    /// and matches any argument list.
+    /// </summary>
+    internal bool MatchesArgs(object?[] args)
+    {
+        if (ArgumentMatchers is null) return true;
+        if (args.Length != ArgumentMatchers.Count) return false;
+        for (int i = 0; i < args.Length; i++)
+        {
+            if (!ArgumentMatchers[i].Matches(args[i])) return false;
+        }
+
+        return true;
+    }
 
     internal object? CreateInstance() => CreateInstanceWithArgs([]);
 
