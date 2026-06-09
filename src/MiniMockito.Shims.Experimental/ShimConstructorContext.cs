@@ -1,8 +1,12 @@
 namespace MiniMockito.Shims.Experimental;
 
 /// <summary>
-/// Provides constructor call information to args-aware shim factories.
+/// Provides constructor call information to args-aware shim factories registered via
+/// <see cref="NewShimBuilder{T}.Returns(Func{ShimConstructorContext, T})"/>.
 /// </summary>
+/// <remarks>
+/// <b>Experimental.</b> This class is part of the experimental shim API. API may change in future phases.
+/// </remarks>
 public sealed class ShimConstructorContext
 {
     internal ShimConstructorContext(Type targetType, object?[] arguments)
