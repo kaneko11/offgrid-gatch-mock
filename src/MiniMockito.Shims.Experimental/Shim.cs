@@ -44,4 +44,86 @@ public static class Shim
         var context = ShimContext.RequireCurrent();
         return new NewShimBuilder<T>(context);
     }
+
+    // ─────────────────────────────────────────────────────────────────────────
+    // Static method shims (Phase 14)
+    // ─────────────────────────────────────────────────────────────────────────
+
+    /// <summary>
+    /// Starts configuring a shim rule for a non-void static method identified by full type name.
+    /// </summary>
+    /// <typeparam name="TResult">The return type of the static method.</typeparam>
+    /// <param name="declaringTypeFullName">
+    /// The full name of the type that declares the method (e.g. <c>"My.Namespace.Clock"</c>).
+    /// </param>
+    /// <param name="methodName">The method name.</param>
+    /// <param name="parameterTypes">Parameter types in declaration order; omit for parameterless methods.</param>
+    public static StaticShimBuilder<TResult> Static<TResult>(
+        string declaringTypeFullName,
+        string methodName,
+        params Type[] parameterTypes)
+    {
+        ArgumentException.ThrowIfNullOrWhiteSpace(declaringTypeFullName);
+        ArgumentException.ThrowIfNullOrWhiteSpace(methodName);
+        var context = ShimContext.RequireCurrent();
+        var key = new StaticMethodKey(
+            declaringTypeFullName,
+            methodName,
+            (parameterTypes ?? []).Select(t => t.FullName ?? t.Name).ToArray());
+        return new StaticShimBuilder<TResult>(key, context);
+    }
+
+    /// <summary>
+    /// Starts configuring a shim rule for a non-void static method identified by <see cref="Type"/>.
+    /// </summary>
+    /// <typeparam name="TResult">The return type of the static method.</typeparam>
+    /// <param name="declaringType">The type that declares the method.</param>
+    /// <param name="methodName">The method name.</param>
+    /// <param name="parameterTypes">Parameter types in declaration order.</param>
+    public static StaticShimBuilder<TResult> Static<TResult>(
+        Type declaringType,
+        string methodName,
+        params Type[] parameterTypes)
+    {
+        ArgumentNullException.ThrowIfNull(declaringType);
+        return Static<TResult>(declaringType.FullName ?? declaringType.Name, methodName, parameterTypes);
+    }
+
+    /// <summary>
+    /// Starts configuring a shim rule for a void static method identified by full type name.
+    /// </summary>
+    /// <param name="declaringTypeFullName">
+    /// The full name of the type that declares the method.
+    /// </param>
+    /// <param name="methodName">The method name.</param>
+    /// <param name="parameterTypes">Parameter types in declaration order.</param>
+    public static StaticShimBuilder Static(
+        string declaringTypeFullName,
+        string methodName,
+        params Type[] parameterTypes)
+    {
+        ArgumentException.ThrowIfNullOrWhiteSpace(declaringTypeFullName);
+        ArgumentException.ThrowIfNullOrWhiteSpace(methodName);
+        var context = ShimContext.RequireCurrent();
+        var key = new StaticMethodKey(
+            declaringTypeFullName,
+            methodName,
+            (parameterTypes ?? []).Select(t => t.FullName ?? t.Name).ToArray());
+        return new StaticShimBuilder(key, context);
+    }
+
+    /// <summary>
+    /// Starts configuring a shim rule for a void static method identified by <see cref="Type"/>.
+    /// </summary>
+    /// <param name="declaringType">The type that declares the method.</param>
+    /// <param name="methodName">The method name.</param>
+    /// <param name="parameterTypes">Parameter types in declaration order.</param>
+    public static StaticShimBuilder Static(
+        Type declaringType,
+        string methodName,
+        params Type[] parameterTypes)
+    {
+        ArgumentNullException.ThrowIfNull(declaringType);
+        return Static(declaringType.FullName ?? declaringType.Name, methodName, parameterTypes);
+    }
 }

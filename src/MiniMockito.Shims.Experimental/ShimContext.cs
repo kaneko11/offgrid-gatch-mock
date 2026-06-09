@@ -64,7 +64,15 @@ public sealed class ShimContext : IDisposable
     /// </remarks>
     public ShimDispatchDiagnostics? LastDispatchDiagnostics { get; internal set; }
 
+    /// <summary>
+    /// Gets the diagnostics captured by the most recent <see cref="StaticShimDispatcher"/> call
+    /// within this context.  Returns <see langword="null"/> if no static dispatch has occurred yet.
+    /// </summary>
+    public StaticDispatchDiagnostics? LastStaticDispatchDiagnostics { get; internal set; }
+
     internal ShimRuleRegistry Registry { get; } = new();
+
+    internal StaticShimRegistry StaticRegistry { get; } = new();
 
     internal bool IsDisposed => _disposed;
 
@@ -99,6 +107,7 @@ public sealed class ShimContext : IDisposable
         try
         {
             Registry.Clear();
+            StaticRegistry.Clear();
         }
         catch (Exception ex)
         {

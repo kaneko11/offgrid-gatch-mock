@@ -11,6 +11,12 @@ public sealed class RewriteOptions
     public IReadOnlyList<Type> TargetTypes { get; init; } = [];
 
     /// <summary>
+    /// Gets the allowed target types whose static <c>call</c> sites may be rewritten.
+    /// BCL types are always excluded.
+    /// </summary>
+    public IReadOnlyList<Type> StaticTargetTypes { get; init; } = [];
+
+    /// <summary>
     /// Gets a value indicating whether the rewriter should copy nearby runtime files to the output directory.
     /// </summary>
     public bool CopyRuntimeFiles { get; init; } = true;
