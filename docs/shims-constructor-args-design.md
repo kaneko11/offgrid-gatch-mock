@@ -837,3 +837,73 @@ Shim.New<Foo>()
 - params / optional parameter の高度対応
 - expression tree matcher
 - production assembly in-place rewrite
+
+---
+
+## Phase 9 実装ノート（ShimCaptor）
+
+> **Experimental.** このセクションの API は experimental です。将来のフェーズで変更される可能性があります。
+
+### 実装済み API
+
+#### `ShimCaptor<T>`
+
+```csharp
+// factory
+var captor = ShimCaptor.For<string>();   // 主 API
+var captor = ShimArg.Captor<string>();   // 便利 alias
+
+// matcher として WithArguments に渡す
+Shim.New<UserRepository>()
+    .WithArguments(captor)
+    .Returns(fakeRepository);
+
+// 呼び出し後
+Assert.AreEqual("prod", captor.Value);
+CollectionAssert.AreEqual(new[] { "prod", "prod" }, captor.Values.ToArray());
+```
+
+#### プロパティ / メソッド
+
+| メンバー | 説明 |
+|---------|------|
+| `Value` | 最後に capture した値。未 capture 時は `ShimException` を投げる |
+| `Values` | capture した値を順序どおりすべて返す（読み取り専用） |
+| `HasValue` | capture count > 0 なら `true` |
+| `Clear()` | capture 履歴を消す |
+| `Describe()` | `"Capture<TypeName>()"` |
+
+### null capture の仕様
+
+| 型 | null の扱い |
+|----|------------|
+| reference type (`string` など) | null に一致し、`default(T) = null` を capture する |
+| `Nullable<T>` (`int?` など) | null に一致し、`null` を capture する |
+| non-nullable value type (`int`, `bool` など) | null に一致しない、capture しない |
+
+### mismatch 時の capture 仕様
+
+- 実引数が `T` に代入不可の場合はマッチしない → capture しない
+- non-nullable value type への null は capture しない
+
+### partial capture 仕様
+
+`WithArguments(captor, ShimArg.Eq("strict"))` のように、captor の後に続く matcher が失敗した場合、
+captor はすでに capture 済みになります（partial capture を許容）。
+
+理由: シンプルさを優先。two-pass matching は実装コストが高く、Phase 9 の PoC 範囲を超えるため。
+今後のフェーズで two-pass matching を採用する場合はこの仕様を変更します。
+
+### 複数 rule と capture の関係
+
+- rule は後から登録したものが優先（Phase 8 の "last wins" 仕様に従う）
+- 評価されなかった rule の captor は capture しない
+- 評価された rule の captor は型が一致した時点で capture する
+
+### 対象外
+
+- static method mocking
+- BCL type 差し替え
+- generic class / generic constructor
+- ref / out constructor arguments
+- production assembly in-place rewrite
