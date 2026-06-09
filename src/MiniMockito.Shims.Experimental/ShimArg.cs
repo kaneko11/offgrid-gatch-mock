@@ -4,7 +4,28 @@ namespace MiniMockito.Shims.Experimental;
 /// Factory for argument matchers used with <see cref="NewShimBuilder{T}.WithArguments"/>.
 /// </summary>
 /// <remarks>
-/// All matchers in this class are experimental. API may change in future phases.
+/// <b>Experimental.</b> All matchers in this class are part of the experimental shim API.
+/// API may change in future phases.
+/// <para>
+/// <b>Static import:</b> Add <c>using static MiniMockito.Shims.Experimental.ShimArg;</c> to use
+/// the factory methods without the class name prefix:
+/// <code>
+/// using static MiniMockito.Shims.Experimental.ShimArg;
+///
+/// Shim.New&lt;UserRepository&gt;()
+///     .WithArguments(Any&lt;string&gt;())
+///     .Returns(fakeRepository);
+///
+/// Shim.New&lt;UserRepository&gt;()
+///     .WithArguments(Eq("prod"))
+///     .Returns(fakeRepository);
+///
+/// var captured = Captor&lt;string&gt;();
+/// Shim.New&lt;UserRepository&gt;()
+///     .WithArguments(captured)
+///     .Returns(fakeRepository);
+/// </code>
+/// </para>
 /// <para>
 /// <b>Null matching:</b>
 /// <see cref="Any{T}"/> matches null for reference types and <see cref="Nullable{T}"/>,

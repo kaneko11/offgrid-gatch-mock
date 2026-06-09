@@ -160,6 +160,92 @@ public sealed class ShimRuleRegistry
     }
 
     /// <summary>
+    /// Attempts to find the best matching rule and collects per-rule diagnostics.
+    /// Rules are evaluated from most recently registered to least recently registered.
+    /// Each matcher is called exactly once; for <see cref="ShimCaptor{T}"/> matchers this
+    /// means capture side-effects occur during the single evaluation pass.
+    /// </summary>
+    internal bool TryFindNewRuleWithArgsDiagnostics(
+        Type targetType,
+        object?[] args,
+        out NewShimRule? rule,
+        out ShimDispatchDiagnostics diagnostics)
+    {
+        ArgumentNullException.ThrowIfNull(targetType);
+
+        lock (_syncRoot)
+        {
+            if (!_newRules.TryGetValue(targetType, out var list) || list.Count == 0)
+            {
+                rule = null;
+                diagnostics = new ShimDispatchDiagnostics(targetType, args, [], matchFound: false);
+                return false;
+            }
+
+            var tried = new List<ShimDispatchDiagnostics.TriedRuleInfo>();
+
+            for (int i = list.Count - 1; i >= 0; i--)
+            {
+                var r = list[i];
+                var matchers = r.ArgumentMatchers;
+                bool ruleMatched;
+                string mismatchReason;
+                List<string> descriptions;
+
+                if (matchers is null)
+                {
+                    ruleMatched = true;
+                    mismatchReason = string.Empty;
+                    descriptions = [];
+                }
+                else if (args.Length != matchers.Count)
+                {
+                    ruleMatched = false;
+                    mismatchReason = $"Expected {matchers.Count} argument(s), got {args.Length}";
+                    descriptions = matchers.Select(m => m.Describe()).ToList();
+                }
+                else
+                {
+                    ruleMatched = true;
+                    mismatchReason = string.Empty;
+                    descriptions = [];
+                    for (int j = 0; j < args.Length; j++)
+                    {
+                        var desc = matchers[j].Describe();
+                        descriptions.Add(desc);
+                        if (!matchers[j].Matches(args[j]))
+                        {
+                            ruleMatched = false;
+                            var valStr = args[j] is string sv ? $"\"{sv}\"" : (args[j]?.ToString() ?? "null");
+                            mismatchReason = $"Matcher [{j}] ({desc}) did not match actual value: {valStr}";
+                            for (int k = j + 1; k < matchers.Count; k++)
+                                descriptions.Add(matchers[k].Describe());
+                            break;
+                        }
+                    }
+                }
+
+                tried.Add(new ShimDispatchDiagnostics.TriedRuleInfo(
+                    r.RegistrationOrder,
+                    descriptions.AsReadOnly(),
+                    ruleMatched,
+                    mismatchReason));
+
+                if (ruleMatched)
+                {
+                    rule = r;
+                    diagnostics = new ShimDispatchDiagnostics(targetType, args, tried.AsReadOnly(), matchFound: true);
+                    return true;
+                }
+            }
+
+            rule = null;
+            diagnostics = new ShimDispatchDiagnostics(targetType, args, tried.AsReadOnly(), matchFound: false);
+            return false;
+        }
+    }
+
+    /// <summary>
     /// Removes all rules from this registry.
     /// </summary>
     public void Clear()

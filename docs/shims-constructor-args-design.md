@@ -907,3 +907,146 @@ captor はすでに capture 済みになります（partial capture を許容）
 - generic class / generic constructor
 - ref / out constructor arguments
 - production assembly in-place rewrite
+
+---
+
+## Phase 10 実装ノート（API Polish & Diagnostics Hardening）
+
+> **Experimental.** このセクションの API は experimental です。将来のフェーズで変更される可能性があります。
+
+### 目的
+
+Phase 7〜9 で実装した constructor arguments / WithArguments / ShimCaptor API の
+使いやすさ・診断・ドキュメントを整備します。新しい interception 機能は追加しません。
+
+### static using 対応
+
+`using static MiniMockito.Shims.Experimental.ShimArg;` を宣言することで、
+ファクトリメソッドをクラス名なしで使用できます。
+
+```csharp
+using static MiniMockito.Shims.Experimental.ShimArg;
+
+Shim.New<UserRepository>()
+    .WithArguments(Any<string>())
+    .Returns(fakeRepository);
+
+Shim.New<UserRepository>()
+    .WithArguments(Eq("prod"))
+    .Returns(fakeRepository);
+
+Shim.New<UserRepository>()
+    .WithArguments(Is<string>(s => s.StartsWith("prod")))
+    .Returns(fakeRepository);
+
+var captured = Captor<string>();
+Shim.New<UserRepository>()
+    .WithArguments(captured)
+    .Returns(fakeRepository);
+```
+
+複数引数 constructor:
+
+```csharp
+Shim.New<UserRepository>()
+    .WithArguments(Eq("prod"), Eq(1), Any<bool>())
+    .Returns(fakeRepository);
+```
+
+last stub wins:
+
+```csharp
+Shim.New<UserRepository>()
+    .WithArguments(Any<string>())
+    .Returns(defaultRepository);   // 登録順: 1
+
+Shim.New<UserRepository>()
+    .WithArguments(Eq("prod"))
+    .Returns(prodRepository);      // 登録順: 2 → "prod" に対して優先
+```
+
+no match fallback:
+
+```csharp
+Shim.New<UserRepository>()
+    .WithArguments(Eq("prod"))
+    .Returns(fakeRepository);
+
+// "dev" は Eq("prod") に一致しない → 実 constructor fallback
+var result = ShimDispatcher.NewWithArgs<UserRepository>(["dev"]);
+```
+
+### diagnostics hardening
+
+#### ShimDispatchDiagnostics
+
+各 dispatch 後に `ShimContext.LastDispatchDiagnostics` から診断情報を取得できます。
+
+```csharp
+using (var ctx = ShimContext.Create())
+{
+    Shim.New<UserRepository>()
+        .WithArguments(ShimArg.Eq("prod"))
+        .Returns(fake);
+
+    ShimDispatcher.NewWithArgs<UserRepository>(["dev"]);
+
+    var diag = ctx.LastDispatchDiagnostics!;
+    Console.WriteLine(diag.Format());
+}
+```
+
+出力例:
+
+```text
+No matching new shim rule was found.
+
+Target type: UserRepository
+Actual arguments:
+  [0] "dev" (System.String)
+
+Tried rules:
+  Rule #1:
+    [0] expected: Eq<String>("prod")
+    result: mismatch
+    reason: Matcher [0] (Eq<String>("prod")) did not match actual value: dev
+
+Fallback: real constructor
+```
+
+#### ShimDispatchDiagnostics API
+
+| メンバー | 説明 |
+|---------|------|
+| `TargetType` | 構築対象の型 |
+| `ActualArguments` | 実際に渡されたコンストラクタ引数（value type は boxing 済み） |
+| `TriedRules` | 評価されたルールの一覧（登録逆順） |
+| `MatchFound` | 一致するルールが見つかった場合 true |
+| `FalledBack` | 実 constructor fallback になった場合 true |
+| `Format()` | 人間が読みやすい多行文字列 |
+
+#### ShimDispatchDiagnostics.TriedRuleInfo API
+
+| メンバー | 説明 |
+|---------|------|
+| `RegistrationOrder` | ルールの登録順（単調増加） |
+| `MatcherDescriptions` | 各 matcher の `Describe()` 出力（catch-all の場合は空リスト） |
+| `Matched` | このルールが一致した場合 true |
+| `MismatchReason` | 不一致の理由（一致した場合は空文字列） |
+
+### 重要な仕様（Phase 10 確認）
+
+| 仕様 | 内容 |
+|------|------|
+| `WithArguments` なし | catch-all rule。任意の引数リストに一致する |
+| `WithArguments()` 空配列 | 引数 count = 0 の場合のみ一致（parameterless constructor） |
+| 複数 rule 一致 | 後から登録した rule を優先（last stub wins） |
+| no match | 実 constructor fallback（例外にしない） |
+| captor partial capture | `WithArguments(captor, Eq("strict"))` で captor が一致後に後続 matcher が失敗した場合、captor はすでに capture 済み。これは仕様（意図的な partial capture 許容） |
+| `ShimCaptor<T>.Value` | 最後に capture した値を返す |
+| 未 capture の `Value` | `ShimException` を投げる |
+| `using static ShimArg` | `Any<T>()`, `Eq<T>()`, `Is<T>()`, `Captor<T>()` をクラス名なしで使用可能 |
+| static method mocking | 対象外 |
+| BCL type 差し替え | 対象外 |
+| production assembly in-place rewrite | 対象外 |
+| parallel test safety | 保証しない。`[assembly: DoNotParallelize]` を使用すること |
