@@ -41,4 +41,10 @@ public static class ShimArg
     /// when the actual argument cannot be cast to <typeparamref name="T"/>.
     /// </summary>
     public static IShimArgumentMatcher Is<T>(Func<T?, bool> predicate) => new ShimPredicateMatcher<T>(predicate);
+
+    /// <summary>
+    /// Creates a new <see cref="ShimCaptor{T}"/> that captures constructor arguments of type
+    /// <typeparamref name="T"/>.  Convenience alias for <see cref="ShimCaptor.For{T}()"/>.
+    /// </summary>
+    public static ShimCaptor<T> Captor<T>() => ShimCaptor.For<T>();
 }
