@@ -38,6 +38,7 @@ namespace MiniMockito.Shims.Experimental;
 public sealed class NewInterceptionHarness : IDisposable
 {
     private readonly List<Type> _targetTypes = [];
+    private readonly List<Type> _staticTargetTypes = [];
     private RewrittenAssemblyLoader? _loader;
     private Assembly? _assembly;
     private bool _disposed;
@@ -60,7 +61,7 @@ public sealed class NewInterceptionHarness : IDisposable
     /// <summary>Creates a new harness builder.</summary>
     public static NewInterceptionHarness Create() => new();
 
-    /// <summary>Adds <typeparamref name="T"/> to the allowlist of target types to rewrite.</summary>
+    /// <summary>Adds <typeparamref name="T"/> to the allowlist of <c>newobj</c> target types to rewrite.</summary>
     public NewInterceptionHarness WithTarget<T>() where T : class
     {
         ObjectDisposedException.ThrowIf(_disposed, this);
@@ -69,21 +70,37 @@ public sealed class NewInterceptionHarness : IDisposable
     }
 
     /// <summary>
-    /// Rewrites the assembly that contains the first registered target type and loads the output
-    /// into an isolated <see cref="ShimAssemblyLoadContext"/>.
+    /// Adds <paramref name="staticTargetType"/> to the allowlist of static call target types to rewrite.
+    /// All non-BCL, non-generic static methods on this type whose call sites appear in the target assembly
+    /// will be replaced with wrapper methods that delegate to <see cref="StaticShimDispatcher"/>.
+    /// </summary>
+    public NewInterceptionHarness WithStaticTarget(Type staticTargetType)
+    {
+        ObjectDisposedException.ThrowIf(_disposed, this);
+        ArgumentNullException.ThrowIfNull(staticTargetType);
+        _staticTargetTypes.Add(staticTargetType);
+        return this;
+    }
+
+    /// <summary>
+    /// Rewrites the assembly that contains the first registered target type (or the first static
+    /// target type if no newobj targets are registered) and loads the output into an isolated
+    /// <see cref="ShimAssemblyLoadContext"/>.
     /// </summary>
     /// <exception cref="InvalidOperationException">No target types have been registered.</exception>
     public NewInterceptionHarness RewriteTargetTypeAssembly()
     {
         ObjectDisposedException.ThrowIf(_disposed, this);
 
-        if (_targetTypes.Count == 0)
+        if (_targetTypes.Count == 0 && _staticTargetTypes.Count == 0)
         {
             throw new InvalidOperationException(
-                "No target types registered. Call WithTarget<T>() before RewriteTargetTypeAssembly().");
+                "No target types registered. " +
+                "Call WithTarget<T>() or WithStaticTarget(Type) before RewriteTargetTypeAssembly().");
         }
 
-        return RewriteAssembly(_targetTypes[0].Assembly.Location);
+        var assemblyType = _targetTypes.Count > 0 ? _targetTypes[0] : _staticTargetTypes[0];
+        return RewriteAssembly(assemblyType.Assembly.Location);
     }
 
     /// <summary>
@@ -105,6 +122,7 @@ public sealed class NewInterceptionHarness : IDisposable
             new RewriteOptions
             {
                 TargetTypes = _targetTypes.ToArray(),
+                StaticTargetTypes = _staticTargetTypes.ToArray(),
             });
 
         // Pass the original assembly directory so the ALC can probe for dependencies

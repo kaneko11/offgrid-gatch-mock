@@ -61,6 +61,13 @@ public static class AssemblyRewriter
 
         var rewrittenCount = NewObjRewriter.Rewrite(module, options, diagnostics);
 
+        // Phase 14: also rewrite static call sites when StaticTargetTypes is specified.
+        if (options.StaticTargetTypes.Count > 0)
+        {
+            var staticResult = StaticCallRewriter.Rewrite(module, options, diagnostics);
+            rewrittenCount += staticResult.RewrittenCallSiteCount;
+        }
+
         module.Write(
             outputFullPath,
             new WriterParameters
