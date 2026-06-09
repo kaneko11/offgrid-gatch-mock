@@ -6,6 +6,7 @@ using Microsoft.VisualStudio.TestTools.UnitTesting;
 namespace MiniMockito.Shims.Experimental.Tests;
 
 [TestClass]
+[DoNotParallelize]
 public sealed class NewObjRewritePocTests
 {
     [TestMethod]
