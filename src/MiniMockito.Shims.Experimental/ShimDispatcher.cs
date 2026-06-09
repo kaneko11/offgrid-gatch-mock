@@ -3,24 +3,36 @@ namespace MiniMockito.Shims.Experimental;
 /// <summary>
 /// Entry point intended for rewritten constructor call sites.
 /// </summary>
+/// <remarks>
+/// <b>Experimental.</b> This class is generated into rewritten assemblies by the build-time weaver.
+/// <para>
+/// Dispatch diagnostics are recorded in <see cref="ShimContext.LastDispatchDiagnostics"/> after
+/// every call to <see cref="New{T}"/> and <see cref="NewWithArgs{T}"/>.
+/// </para>
+/// </remarks>
 public static class ShimDispatcher
 {
     /// <summary>
     /// Creates a new instance of <typeparamref name="T"/> through the active shim rule, or by using a public parameterless constructor.
+    /// </summary>
+    /// <remarks>
     /// Rules registered without <c>WithArguments</c> (catch-all rules) and rules registered with an empty
     /// <c>WithArguments()</c> call match parameterless constructor call sites.
     /// Rules that require specific arguments do not match parameterless calls.
-    /// </summary>
+    /// Dispatch diagnostics are written to <see cref="ShimContext.LastDispatchDiagnostics"/>.
+    /// </remarks>
     public static T New<T>()
     {
         var targetType = typeof(T);
         var context = ShimContext.Current;
 
-        if (context is { IsDisposed: false } &&
-            context.Registry.TryFindNewRuleWithArgs(targetType, [], out var rule) &&
-            rule is not null)
+        if (context is { IsDisposed: false })
         {
-            return (T)rule.CreateInstance()!;
+            bool found = context.Registry.TryFindNewRuleWithArgsDiagnostics(
+                targetType, [], out var rule, out var diag);
+            context.LastDispatchDiagnostics = diag;
+            if (found && rule is not null)
+                return (T)rule.CreateInstance()!;
         }
 
         return CreateRealInstance<T>(targetType);
@@ -29,10 +41,15 @@ public static class ShimDispatcher
     /// <summary>
     /// Creates a new instance of <typeparamref name="T"/> through the best matching active shim rule,
     /// or by using the matching public constructor as a fallback.
+    /// </summary>
+    /// <remarks>
     /// Value-type arguments must be boxed by the caller (the rewritten wrapper method handles this automatically).
     /// Rules are evaluated from most recently registered to least recently registered; the first rule
     /// whose argument matchers all pass is selected.  A catch-all rule (no <c>WithArguments</c>) always matches.
-    /// </summary>
+    /// When no rule matches, the real constructor is invoked via <see cref="Activator.CreateInstance(Type, object?[])"/>.
+    /// Dispatch diagnostics (including tried rules and matcher results) are written to
+    /// <see cref="ShimContext.LastDispatchDiagnostics"/>.
+    /// </remarks>
     /// <param name="args">Boxed constructor arguments in declaration order.</param>
     public static T NewWithArgs<T>(object?[] args)
     {
@@ -40,11 +57,13 @@ public static class ShimDispatcher
         var targetType = typeof(T);
         var context = ShimContext.Current;
 
-        if (context is { IsDisposed: false } &&
-            context.Registry.TryFindNewRuleWithArgs(targetType, args, out var rule) &&
-            rule is not null)
+        if (context is { IsDisposed: false })
         {
-            return (T)rule.CreateInstanceWithArgs(args)!;
+            bool found = context.Registry.TryFindNewRuleWithArgsDiagnostics(
+                targetType, args, out var rule, out var diag);
+            context.LastDispatchDiagnostics = diag;
+            if (found && rule is not null)
+                return (T)rule.CreateInstanceWithArgs(args)!;
         }
 
         return CreateRealInstanceWithArgs<T>(targetType, args);

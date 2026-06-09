@@ -53,6 +53,17 @@ public sealed class ShimContext : IDisposable
     /// </summary>
     public static int ActiveContextCount => Volatile.Read(ref _activeContextCount);
 
+    /// <summary>
+    /// Gets the diagnostics captured by the most recent
+    /// <see cref="ShimDispatcher.New{T}"/> or <see cref="ShimDispatcher.NewWithArgs{T}"/> call
+    /// within this context.  Returns <see langword="null"/> if no dispatch has occurred yet.
+    /// </summary>
+    /// <remarks>
+    /// <b>Experimental.</b> Intended for debugging and test assertions.
+    /// Overwritten on each dispatch call.
+    /// </remarks>
+    public ShimDispatchDiagnostics? LastDispatchDiagnostics { get; internal set; }
+
     internal ShimRuleRegistry Registry { get; } = new();
 
     internal bool IsDisposed => _disposed;
