@@ -7,6 +7,7 @@ namespace MiniMockito.Shims.Experimental;
 public sealed class NewShimBuilder<T>
 {
     private readonly ShimContext _context;
+    private IReadOnlyList<IShimArgumentMatcher>? _matchers;
 
     internal NewShimBuilder(ShimContext context)
     {
@@ -16,12 +17,44 @@ public sealed class NewShimBuilder<T>
     }
 
     /// <summary>
+    /// Constrains this rule to constructor calls whose arguments all satisfy the supplied matchers.
+    /// </summary>
+    /// <remarks>
+    /// <list type="bullet">
+    ///   <item>
+    ///     Calling <see cref="WithArguments"/> without argument matchers matches only parameterless
+    ///     constructors (argument count is zero).
+    ///   </item>
+    ///   <item>
+    ///     Calling <see cref="Returns(T)"/> (or any overload) <em>without</em> calling
+    ///     <see cref="WithArguments"/> first registers a <em>catch-all</em> rule that matches
+    ///     any constructor argument list.
+    ///   </item>
+    ///   <item>
+    ///     When multiple rules match the same call site the most recently registered rule wins
+    ///     (Mockito-style: "last stub wins").
+    ///   </item>
+    ///   <item>
+    ///     Calling <see cref="WithArguments"/> more than once on the same builder overwrites
+    ///     the previous matchers.
+    ///   </item>
+    /// </list>
+    /// </remarks>
+    public NewShimBuilder<T> WithArguments(params IShimArgumentMatcher[] matchers)
+    {
+        ArgumentNullException.ThrowIfNull(matchers);
+        _context.EnsureActive();
+        _matchers = matchers;
+        return this;
+    }
+
+    /// <summary>
     /// Registers a fixed replacement instance for the target type.
     /// </summary>
     public NewShimRule Returns(T instance)
     {
         _context.EnsureActive();
-        return _context.Registry.RegisterNewRule(typeof(T), () => instance, _context.ContextId);
+        return _context.Registry.RegisterNewRule(typeof(T), () => instance, _context.ContextId, _matchers);
     }
 
     /// <summary>
@@ -31,7 +64,7 @@ public sealed class NewShimBuilder<T>
     {
         ArgumentNullException.ThrowIfNull(factory);
         _context.EnsureActive();
-        return _context.Registry.RegisterNewRule(typeof(T), () => factory(), _context.ContextId);
+        return _context.Registry.RegisterNewRule(typeof(T), () => factory(), _context.ContextId, _matchers);
     }
 
     /// <summary>
@@ -42,7 +75,7 @@ public sealed class NewShimBuilder<T>
     {
         ArgumentNullException.ThrowIfNull(argsFactory);
         _context.EnsureActive();
-        return _context.Registry.RegisterNewRule(typeof(T), args => argsFactory(args), _context.ContextId);
+        return _context.Registry.RegisterNewRule(typeof(T), args => argsFactory(args), _context.ContextId, _matchers);
     }
 
     /// <summary>
@@ -52,7 +85,7 @@ public sealed class NewShimBuilder<T>
     {
         ArgumentNullException.ThrowIfNull(contextFactory);
         _context.EnsureActive();
-        return _context.Registry.RegisterNewRuleWithContext(typeof(T), ctx => contextFactory(ctx), _context.ContextId);
+        return _context.Registry.RegisterNewRuleWithContext(typeof(T), ctx => contextFactory(ctx), _context.ContextId, _matchers);
     }
 
     private static void ValidateTargetType(Type targetType)
