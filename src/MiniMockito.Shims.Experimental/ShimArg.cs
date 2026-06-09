@@ -1,7 +1,8 @@
 namespace MiniMockito.Shims.Experimental;
 
 /// <summary>
-/// Factory for argument matchers used with <see cref="NewShimBuilder{T}.WithArguments"/>.
+/// Factory for argument matchers used with <see cref="NewShimBuilder{T}.WithArguments"/>,
+/// <see cref="StaticShimBuilder{TResult}.WithArguments"/>, and <see cref="StaticShimBuilder.WithArguments"/>.
 /// </summary>
 /// <remarks>
 /// <b>Experimental.</b> All matchers in this class are part of the experimental shim API.
@@ -12,13 +13,15 @@ namespace MiniMockito.Shims.Experimental;
 /// <code>
 /// using static MiniMockito.Shims.Experimental.ShimArg;
 ///
+/// // newobj interception
 /// Shim.New&lt;UserRepository&gt;()
 ///     .WithArguments(Any&lt;string&gt;())
 ///     .Returns(fakeRepository);
 ///
-/// Shim.New&lt;UserRepository&gt;()
-///     .WithArguments(Eq("prod"))
-///     .Returns(fakeRepository);
+/// // static method interception (Phase 14+)
+/// Shim.Static&lt;string&gt;(typeof(Clock), "GetName", typeof(int))
+///     .WithArguments(Eq(42))
+///     .Returns("shimmed");
 ///
 /// var captured = Captor&lt;string&gt;();
 /// Shim.New&lt;UserRepository&gt;()
@@ -35,7 +38,7 @@ namespace MiniMockito.Shims.Experimental;
 /// <para>
 /// <b>Value type boxing:</b>
 /// Matchers receive boxed <see langword="object?"/> values. The generated wrapper method boxes
-/// value-type constructor arguments before passing them to <see cref="ShimDispatcher.NewWithArgs{T}"/>.
+/// value-type arguments before passing them to the dispatcher.
 /// Matchers use <c>actual is T</c> / <c>EqualityComparer&lt;T&gt;.Default</c> to unbox correctly.
 /// </para>
 /// </remarks>
