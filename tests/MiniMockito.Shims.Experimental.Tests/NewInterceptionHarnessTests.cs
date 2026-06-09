@@ -71,7 +71,8 @@ public sealed class NewInterceptionHarnessTests
             .RewriteTargetTypeAssembly();
 
         Assert.IsNotNull(harness.LastRewriteResult);
-        Assert.AreEqual(1, harness.LastRewriteResult.RewrittenCallSiteCount);
+        // Phase 7: parameterless + two string-arg UserRepository call sites are all rewritten.
+        Assert.AreEqual(3, harness.LastRewriteResult.RewrittenCallSiteCount);
     }
 
     [TestMethod]

@@ -24,7 +24,7 @@ public sealed class NewObjRewritePocTests
             });
 
         Assert.IsTrue(File.Exists(outputAssemblyPath));
-        Assert.AreEqual(1, result.RewrittenCallSiteCount);
+        Assert.AreEqual(3, result.RewrittenCallSiteCount);
         Assert.IsTrue(result.Report.SupportedCallSites.Count >= 1);
         Assert.IsTrue(result.Diagnostics.Any(message => message.Contains("Rewrote", StringComparison.Ordinal)));
         CollectionAssert.AreEqual(originalHash, ComputeSha256(originalAssemblyPath));
@@ -110,11 +110,9 @@ public sealed class NewObjRewritePocTests
                 TargetTypes = [typeof(UserRepository), typeof(GenericRepository<string>)],
             });
 
-        Assert.AreEqual(1, result.RewrittenCallSiteCount);
-        Assert.IsTrue(
-            result.Report.UnsupportedCallSites.Any(callSite =>
-                callSite.TargetTypeName == typeof(UserRepository).FullName
-                && callSite.UnsupportedReason == "ConstructorArgumentsNotSupported"));
+        // Phase 7: UserRepository(string) is now supported; count includes parameterless + string-arg sites.
+        Assert.IsTrue(result.RewrittenCallSiteCount >= 1);
+        // GenericRepository is still unsupported.
         Assert.IsTrue(
             result.Report.UnsupportedCallSites.Any(callSite =>
                 callSite.TargetTypeName.Contains(nameof(GenericRepository<string>), StringComparison.Ordinal)

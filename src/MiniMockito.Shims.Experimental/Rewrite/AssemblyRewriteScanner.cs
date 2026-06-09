@@ -243,9 +243,14 @@ public static class AssemblyRewriteScanner
             return "GenericTypeNotSupported";
         }
 
-        if (constructor.GetParameters().Length != 0)
+        foreach (var param in constructor.GetParameters())
         {
-            return "ConstructorArgumentsNotSupported";
+            if (param.ParameterType.IsByRef)
+                return "ByRefArgumentNotSupported";
+            if (param.ParameterType.IsGenericParameter || param.ParameterType.ContainsGenericParameters)
+                return "GenericArgumentNotSupported";
+            if (param.IsDefined(typeof(ParamArrayAttribute), false))
+                return "ParamsArgumentNotSupported";
         }
 
         if (!constructor.IsPublic)

@@ -27,14 +27,15 @@ public sealed class RewriteDryRunTests
     }
 
     [TestMethod]
-    public void Scan_ReportsConstructorArgumentsAsUnsupported()
+    public void Scan_ReportsSimpleConstructorArgumentsAsSupported()
     {
+        // Phase 7: simple constructor arguments (string, int, bool) are now supported.
         var report = ScanFor(typeof(DryRunRepositoryWithArguments));
 
         var callSite = SingleCallSiteForMethod(report, nameof(DryRunSampleService.CreateRepositoryWithArguments));
 
-        Assert.IsFalse(callSite.IsSupported);
-        Assert.AreEqual("ConstructorArgumentsNotSupported", callSite.UnsupportedReason);
+        Assert.IsTrue(callSite.IsSupported);
+        Assert.IsNull(callSite.UnsupportedReason);
         StringAssert.Contains(callSite.TargetConstructor, typeof(string).FullName!);
     }
 
@@ -65,11 +66,12 @@ public sealed class RewriteDryRunTests
     public void Scan_ReportContainsAssemblyAndTargetMetadata()
     {
         var assemblyPath = typeof(DryRunSampleService).Assembly.Location;
+        // Phase 7: use DryRunByRefTarget (ref param — still unsupported) for the unsupported side.
         var report = AssemblyRewriteScanner.Scan(
             assemblyPath,
             new NewObjScanOptions
             {
-                TargetTypes = [typeof(DryRunUserRepository), typeof(DryRunRepositoryWithArguments)]
+                TargetTypes = [typeof(DryRunUserRepository), typeof(DryRunByRefTarget)]
             });
 
         Assert.AreEqual(Path.GetFullPath(assemblyPath), report.AssemblyPath);
@@ -81,12 +83,13 @@ public sealed class RewriteDryRunTests
     [TestMethod]
     public void Scan_UnsupportedReasonIsReadable()
     {
-        var report = ScanFor(typeof(DryRunRepositoryWithArguments));
+        // Phase 7: by-ref constructor arguments remain unsupported.
+        var report = ScanFor(typeof(DryRunByRefTarget));
 
-        var callSite = SingleCallSiteForMethod(report, nameof(DryRunSampleService.CreateRepositoryWithArguments));
+        var callSite = SingleCallSiteForMethod(report, nameof(DryRunSampleService.CreateByRefTarget));
 
         Assert.IsFalse(string.IsNullOrWhiteSpace(callSite.UnsupportedReason));
-        StringAssert.Contains(callSite.UnsupportedReason, "ConstructorArguments");
+        StringAssert.Contains(callSite.UnsupportedReason, "ByRef");
     }
 
     private static RewriteReport ScanFor(params Type[] targetTypes)
@@ -126,6 +129,11 @@ public sealed class RewriteDryRunTests
         {
             return new DryRunGenericRepository<string>();
         }
+
+        public DryRunByRefTarget CreateByRefTarget(int value)
+        {
+            return new DryRunByRefTarget(ref value);
+        }
     }
 
     public sealed class DryRunUserRepository
@@ -148,5 +156,12 @@ public sealed class RewriteDryRunTests
 
     public sealed class DryRunGenericRepository<T>
     {
+    }
+
+    public sealed class DryRunByRefTarget
+    {
+        public DryRunByRefTarget(ref int value)
+        {
+        }
     }
 }

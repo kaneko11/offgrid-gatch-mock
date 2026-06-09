@@ -909,3 +909,95 @@ assembly's type as the registry key, and why method invocations must go through 
 - detour or method patching
 - Visual Studio Test Explorer full integration
 - parallel test safety guarantee
+
+## 17. Phase 6: constructor arguments design
+
+Phase 6 は設計調査フェーズです。実装はありません。
+詳細な設計は `docs/shims-constructor-args-design.md` を参照してください。
+
+### 17.1 問題の本質
+
+`new UserRepository("prod")` の IL は次のとおりです。
+
+```text
+ldstr "prod"
+newobj instance void UserRepository::.ctor(string)
+```
+
+parameterless の場合は `newobj` を `call ShimDispatcher.New<T>()` に単純置換できました。
+引数ありの場合は `newobj` がスタック上の引数を消費するため、単純置換は不可です。
+
+### 17.2 推奨する実装方式
+
+**Wrapper Method 生成（方式 B）**
+
+コンストラクタシグネチャごとに入力 assembly 内に静的ラッパーメソッドを生成し、
+`newobj` をそのラッパーへの `call` に置き換えます。
+
+```text
+; 変換前
+ldstr "prod"
+newobj instance void UserRepository::.ctor(string)
+
+; 変換後
+ldstr "prod"
+call static UserRepository __ShimWrap_UserRepository_String(string)
+```
+
+ラッパー内部で引数を `object[]` に収め `ShimDispatcher.NewWithArgs<T>(object?[])` を呼びます。
+スタック効果が元の `newobj` と同一なため、呼び出し元の命令を変更しなくて済みます。
+
+### 17.3 主な変更点（Phase 7 で実装）
+
+| コンポーネント | 変更内容 |
+|--------------|---------|
+| `ShimDispatcher` | `NewWithArgs<T>(object?[])` 追加 |
+| `ShimRuleRegistry` | 1 型に複数ルール（overload 対応） |
+| `NewShimRule` | `ArgumentMatchers` フィールド追加 |
+| `NewObjRewriter` | ラッパーメソッド生成、引数 boxing |
+| 新規: `IShimArgumentMatcher` | shim 専用 matcher インターフェース |
+| 新規: `ShimMatch` | `Any<T>()`, `Eq<T>()`, `Is<T>()` ファクトリ |
+| 新規: `ShimCaptor<T>` | コンストラクタ引数のキャプチャ |
+| 新規: `NewCreationContext` | factory API 用の引数アクセサ |
+
+### 17.4 API 方針（Phase 7 推奨）
+
+**Option B（NewCreationContext による factory）から開始する。**
+
+```csharp
+Shim.New<UserRepository>()
+    .Returns(ctx =>
+    {
+        var connectionString = ctx.Arguments.Get<string>(0);
+        return fakeRepository;
+    });
+```
+
+理由: 引数の個数・型が実行時に決まるため柔軟性が最優先。
+matchers API（Option A）は設計が固まった後に追加する。
+
+### 17.5 Phase 6 で明確になった unsupported patterns
+
+| Pattern | 診断コード |
+|---------|-----------|
+| `params` parameter | `ParamsParameterNotSupported` |
+| `ref` / `out` / `in` parameter | `RefParameterNotSupported` |
+| `__arglist` | `ArglistParameterNotSupported` |
+| unsafe pointer parameter | `UnsafePointerParameterNotSupported` |
+| open generic argument | `OpenGenericArgumentNotSupported` |
+
+これらは Phase 7 以降でも対象外を継続することを推奨します。
+
+### 17.6 Still unsupported in Phase 6 (design only — no implementation)
+
+- constructor arguments（Phase 7 で実装予定）
+- in-place production assembly rewrite
+- BCL type replacement
+- static method mocking
+- sealed or non-virtual method body interception
+- generic target classes
+- runtime IL rewrite
+- CLR Profiling API
+- detour or method patching
+- Visual Studio Test Explorer full integration
+- parallel test safety guarantee

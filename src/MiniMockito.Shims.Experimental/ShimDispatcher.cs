@@ -8,8 +8,6 @@ public static class ShimDispatcher
     /// <summary>
     /// Creates a new instance of <typeparamref name="T"/> through the active shim rule, or by using a public parameterless constructor.
     /// </summary>
-    /// <typeparam name="T">The target type to create.</typeparam>
-    /// <returns>The replacement instance when a rule exists; otherwise a real instance.</returns>
     public static T New<T>()
     {
         var targetType = typeof(T);
@@ -19,11 +17,31 @@ public static class ShimDispatcher
             context.Registry.TryFindNewRule(targetType, out var rule) &&
             rule is not null)
         {
-            var result = rule.CreateInstance();
-            return (T)result!;
+            return (T)rule.CreateInstance()!;
         }
 
         return CreateRealInstance<T>(targetType);
+    }
+
+    /// <summary>
+    /// Creates a new instance of <typeparamref name="T"/> through the active shim rule, or by using the matching public constructor.
+    /// Value-type arguments must be boxed by the caller (the rewritten wrapper method handles this automatically).
+    /// </summary>
+    /// <param name="args">Boxed constructor arguments in declaration order.</param>
+    public static T NewWithArgs<T>(object?[] args)
+    {
+        ArgumentNullException.ThrowIfNull(args);
+        var targetType = typeof(T);
+        var context = ShimContext.Current;
+
+        if (context is { IsDisposed: false } &&
+            context.Registry.TryFindNewRule(targetType, out var rule) &&
+            rule is not null)
+        {
+            return (T)rule.CreateInstanceWithArgs(args)!;
+        }
+
+        return CreateRealInstanceWithArgs<T>(targetType, args);
     }
 
     private static T CreateRealInstance<T>(Type targetType)
@@ -59,6 +77,39 @@ public static class ShimDispatcher
         }
     }
 
+    private static T CreateRealInstanceWithArgs<T>(Type targetType, object?[] args)
+    {
+        if (!targetType.IsClass)
+        {
+            throw CreateFallbackException(targetType, "TargetTypeIsNotAClass", "ShimDispatcher.NewWithArgs<T>() fallback supports reference types.");
+        }
+
+        if (targetType.ContainsGenericParameters)
+        {
+            throw CreateFallbackException(targetType, "OpenGenericTypeNotSupported", "Use a closed non-generic class.");
+        }
+
+        if (targetType.IsAbstract)
+        {
+            throw CreateFallbackException(targetType, "AbstractTypeNotSupported", "Register a replacement instance or use a concrete class.");
+        }
+
+        try
+        {
+            var instance = Activator.CreateInstance(targetType, args);
+            if (instance is null)
+            {
+                throw CreateFallbackException(targetType, "ConstructorReturnedNull", "Register a replacement instance with Shim.New<T>().Returns(...).");
+            }
+
+            return (T)instance;
+        }
+        catch (MissingMethodException exception)
+        {
+            throw CreateFallbackException(targetType, "PublicConstructorNotFound", "Ensure a matching public constructor exists or register a replacement rule.", exception);
+        }
+    }
+
     private static ShimUnsupportedException CreateFallbackException(
         Type targetType,
         string reason,
@@ -69,20 +120,18 @@ public static class ShimDispatcher
             Environment.NewLine,
             "New shim fallback cannot create a real instance.",
             $"Target type: {targetType.FullName}",
-            "Constructor: .ctor()",
             "Calling assembly: <manual dispatcher>",
-            "Calling method: ShimDispatcher.New<T>()",
+            "Calling method: ShimDispatcher",
             "Rewrite mode: None",
             $"Reason: {reason}",
             "Supported patterns:",
             "  public non-generic class",
-            "  public parameterless constructor",
+            "  public constructor",
             "Unsupported patterns:",
             "  value types",
             "  interfaces",
             "  abstract types",
             "  open generic types",
-            "  constructor arguments",
             $"Hint: {hint}");
 
         return innerException is null

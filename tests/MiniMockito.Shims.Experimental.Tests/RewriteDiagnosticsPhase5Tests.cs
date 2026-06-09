@@ -48,8 +48,8 @@ public sealed class RewriteDiagnosticsPhase5Tests
     [TestMethod]
     public void RewriteResult_SkippedCallSiteDescriptions_ContainsSkippedSites()
     {
-        // UserRepository has a constructor with arguments — that call site should be skipped.
-        var result = RewriteSampleAssembly([typeof(UserRepository)]);
+        // ByRefTarget has a ref constructor — that call site is in the allowlist but cannot be rewritten.
+        var result = RewriteSampleAssembly([typeof(UserRepository), typeof(ByRefTarget)]);
 
         Assert.IsTrue(result.SkippedCallSiteDescriptions.Count >= 1,
             "At least one skipped call site description should be present.");
@@ -58,12 +58,12 @@ public sealed class RewriteDiagnosticsPhase5Tests
     [TestMethod]
     public void RewriteResult_SkippedCallSiteDescriptions_ContainUnsupportedReason()
     {
-        var result = RewriteSampleAssembly([typeof(UserRepository)]);
+        // ByRefTarget has a ref constructor that must be skipped with a human-readable reason.
+        var result = RewriteSampleAssembly([typeof(UserRepository), typeof(ByRefTarget)]);
 
         Assert.IsTrue(
             result.SkippedCallSiteDescriptions.Any(d =>
-                d.Contains("constructor arguments", StringComparison.OrdinalIgnoreCase) ||
-                d.Contains("generic", StringComparison.OrdinalIgnoreCase) ||
+                d.Contains("by-ref", StringComparison.OrdinalIgnoreCase) ||
                 d.Contains("not supported", StringComparison.OrdinalIgnoreCase)),
             "Skipped description should contain a human-readable reason.");
     }
@@ -96,19 +96,21 @@ public sealed class RewriteDiagnosticsPhase5Tests
     // -------------------------------------------------------------------------
 
     [TestMethod]
-    public void UnsupportedPattern_ConstructorArguments_ReportedInScanResult()
+    public void UnsupportedPattern_ByRefConstructorArgument_ReportedInScanResult()
     {
+        // Phase 7: simple constructor arguments (string, int, bool, reference) are now supported.
+        // By-ref parameters remain unsupported and should still be reported.
         var report = AssemblyRewriteScanner.Scan(
             typeof(UserService).Assembly.Location,
             new NewObjScanOptions
             {
-                TargetTypes = [typeof(UserRepository)],
+                TargetTypes = [typeof(ByRefTarget)],
             });
 
         Assert.IsTrue(
             report.UnsupportedCallSites.Any(cs =>
-                cs.UnsupportedReason == "ConstructorArgumentsNotSupported"),
-            "Constructor arguments should be reported as unsupported.");
+                cs.UnsupportedReason == "ByRefArgumentNotSupported"),
+            "By-ref constructor arguments should be reported as unsupported.");
     }
 
     [TestMethod]
