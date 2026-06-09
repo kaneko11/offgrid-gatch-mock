@@ -56,4 +56,57 @@ public sealed class RewriteResult
     /// Gets human-readable rewrite diagnostics.
     /// </summary>
     public IReadOnlyList<string> Diagnostics { get; }
+
+    /// <summary>
+    /// Gets the descriptions of call sites that were successfully rewritten.
+    /// Each entry is a line from <see cref="Diagnostics"/> that starts with "Rewrote ".
+    /// </summary>
+    public IReadOnlyList<string> RewrittenCallSiteDescriptions =>
+        Diagnostics
+            .Where(d => d.StartsWith("Rewrote ", StringComparison.Ordinal))
+            .ToArray();
+
+    /// <summary>
+    /// Gets the descriptions of call sites that were found in the allowlist but skipped.
+    /// Each entry is a line from <see cref="Diagnostics"/> that starts with "Skipped ".
+    /// </summary>
+    public IReadOnlyList<string> SkippedCallSiteDescriptions =>
+        Diagnostics
+            .Where(d => d.StartsWith("Skipped ", StringComparison.Ordinal))
+            .ToArray();
+
+    /// <summary>
+    /// Returns a human-readable summary of the rewrite result.
+    /// </summary>
+    public string ToSummary()
+    {
+        var lines = new List<string>
+        {
+            "=== Rewrite Result ===",
+            $"Original assembly : {OriginalAssemblyPath}",
+            $"Rewritten assembly: {RewrittenAssemblyPath}",
+            $"Rewritten call sites  : {RewrittenCallSiteCount}",
+            $"Unsupported call sites: {UnsupportedCallSiteCount}",
+        };
+
+        if (RewrittenCallSiteDescriptions.Count > 0)
+        {
+            lines.Add("Rewritten:");
+            foreach (var desc in RewrittenCallSiteDescriptions)
+            {
+                lines.Add($"  + {desc}");
+            }
+        }
+
+        if (SkippedCallSiteDescriptions.Count > 0)
+        {
+            lines.Add("Skipped:");
+            foreach (var desc in SkippedCallSiteDescriptions)
+            {
+                lines.Add($"  - {desc}");
+            }
+        }
+
+        return string.Join(Environment.NewLine, lines);
+    }
 }

@@ -759,3 +759,153 @@ Still unsupported in Phase 4:
 - detour or method patching
 - Visual Studio Test Explorer full integration
 - parallel test safety guarantee
+
+## 16. Phase 5 integration and safety
+
+Phase 5 does not expand the rewrite target set.  The goal is to make the existing limited
+`newobj` rewrite PoC safer and easier to use in tests.
+
+### 16.1 ShimContext safety improvements
+
+#### Nested context behaviour
+
+`ShimContext.Create()` inside an existing context creates a child scope with an isolated rule
+registry.  The child **does not inherit** rules from the parent.  When the child is disposed the
+parent becomes the active context again.  Always dispose in LIFO order.
+
+```
+outer = ShimContext.Create()          // outer is active
+  inner = ShimContext.Create()        // inner is active; outer is paused
+    ...inner rules only visible here...
+  inner.Dispose()                     // outer becomes active again
+outer.Dispose()
+```
+
+If an outer context is disposed before its child (out-of-order disposal), the inner context is
+left orphaned in the async-local slot.  The rule is: dispose children first.
+
+#### Async / threading notes
+
+`ShimContext` uses `AsyncLocal<T>`.  An async continuation or background `Task` started inside a
+`using` block captures the ambient context at the time it is scheduled.  Changes to the context
+after that point are not visible to the continuation.  Do not rely on cross-thread rule
+propagation; pass required replacements explicitly.
+
+#### Dispose leak detection
+
+`ShimContext.ActiveContextCount` is a static counter incremented on `Create()` and decremented on
+`Dispose()`.  Tests can assert this is unchanged after a test method completes to detect leaks:
+
+```csharp
+[TestInitialize]
+public void Init()   => _countBefore = ShimContext.ActiveContextCount;
+
+[TestCleanup]
+public void Cleanup() => Assert.AreEqual(_countBefore, ShimContext.ActiveContextCount);
+```
+
+#### Cleanup failure exposure
+
+`ShimContext.Dispose()` wraps `Registry.Clear()` in a try/catch.  If cleanup throws, the
+exception is stored in `ShimContext.CleanupException` and re-thrown as a `ShimException` so the
+`using` block fails visibly.
+
+#### Context-outside usage
+
+`ShimContext.RequireCurrent()` now distinguishes two cases:
+- **No context at all** — message contains `"No active ShimContext."`.
+- **Disposed context** — message contains `"The active ShimContext has already been disposed."` and the `ContextId`.
+
+### 16.2 Parallel test safety
+
+The `[assembly: DoNotParallelize]` attribute in `AssemblyInfo.cs` prevents MSTest from running
+shims tests concurrently.  Each test class also carries `[DoNotParallelize]` as a secondary guard.
+
+Why parallel execution is unsafe:
+- `ShimRuleRegistry` is per-context but `ShimContext.Current` is async-local; background threads
+  that were started before the context boundary may still call `ShimDispatcher.New<T>()` after
+  the context is disposed.
+- Two concurrent test methods that both call `ShimContext.Create()` each get their own context,
+  but if either spawns a `Task.Run()` continuation that outlives the using block, the wrong
+  (already-cleared) context is seen.
+- Process-wide assembly rewrite output files are not protected by any mutex; concurrent rewrites
+  to the same output path would corrupt the output.
+
+### 16.3 Rewrite diagnostics improvements
+
+`RewriteResult` now exposes:
+
+| Property | Description |
+|----------|-------------|
+| `RewrittenCallSiteDescriptions` | Lines from `Diagnostics` beginning with `"Rewrote "` |
+| `SkippedCallSiteDescriptions`   | Lines from `Diagnostics` beginning with `"Skipped "` |
+| `ToSummary()`                   | Human-readable multi-line summary |
+
+Example summary:
+```
+=== Rewrite Result ===
+Original assembly : /path/to/Sample.dll
+Rewritten assembly: /tmp/.../Sample.dll
+Rewritten call sites  : 1
+Unsupported call sites: 2
+Rewritten:
+  + Rewrote Sample.UserService.GetDisplayName IL_0000: new UserRepository() -> ShimDispatcher.New<UserRepository>()
+Skipped:
+  - Skipped Sample.UserService.CreateRepositoryWithArguments IL_0001: constructor arguments are not supported.
+  - Skipped Sample.UserService.CreateGenericRepository IL_0002: generic target types are not supported.
+```
+
+### 16.4 NewInterceptionHarness test helper
+
+`NewInterceptionHarness` combines rewrite, load and instance creation into a single fluent API:
+
+```csharp
+using var harness = NewInterceptionHarness.Create()
+    .WithTarget<UserRepository>()
+    .RewriteTargetTypeAssembly();
+
+using (ShimContext.Create())
+{
+    var fake = harness.CreateFake<UserRepository>("fake-prefix");
+    harness.RegisterShim<UserRepository>(fake);
+
+    var service = harness.Create<UserService>();
+    var result  = harness.Invoke<string>(service, "GetDisplayName", 42);
+    // result == "fake-prefix-42"
+}
+```
+
+Key methods:
+
+| Method | Purpose |
+|--------|---------|
+| `WithTarget<T>()` | Adds T to the rewrite allowlist |
+| `RewriteTargetTypeAssembly()` | Rewrites the assembly that contains the first registered target type |
+| `RewriteAssembly(string path)` | Rewrites an explicit assembly path |
+| `Create<TService>()` | Creates a service instance from the rewritten assembly (parameterless ctor) |
+| `CreateFake<TTarget>(params object[] args)` | Creates a replacement instance from the rewritten assembly |
+| `RegisterShim<TTarget>(object fake)` | Registers a shim rule using the rewritten assembly's type — must be called inside an active `ShimContext` |
+| `Invoke<TResult>(object, string, params object[])` | Invokes a public method via reflection |
+| `GetRewrittenType(Type)` | Returns the runtime `Type` from the rewritten load context |
+| `LastRewriteResult` | The `RewriteResult` from the last rewrite operation |
+
+**Important:** instances from `Create<TService>()` and `CreateFake<TTarget>()` come from a
+different `AssemblyLoadContext` than the test project.  Their runtime types are different objects
+even though they share the same `FullName`.  This is why `RegisterShim<T>` uses the rewritten
+assembly's type as the registry key, and why method invocations must go through reflection or
+`Invoke<TResult>`.
+
+### 16.5 Still unsupported in Phase 5
+
+- in-place production assembly rewrite
+- BCL type replacement
+- static method mocking
+- sealed or non-virtual method body interception
+- constructor arguments
+- generic target classes
+- generic constructors
+- runtime IL rewrite
+- CLR Profiling API
+- detour or method patching
+- Visual Studio Test Explorer full integration
+- parallel test safety guarantee
