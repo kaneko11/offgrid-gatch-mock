@@ -18,8 +18,6 @@ public sealed class NewShimBuilder<T>
     /// <summary>
     /// Registers a fixed replacement instance for the target type.
     /// </summary>
-    /// <param name="instance">The instance returned by <see cref="ShimDispatcher.New{T}"/> while this context is active.</param>
-    /// <returns>The registered rule.</returns>
     public NewShimRule Returns(T instance)
     {
         _context.EnsureActive();
@@ -27,15 +25,34 @@ public sealed class NewShimBuilder<T>
     }
 
     /// <summary>
-    /// Registers a replacement factory for the target type.
+    /// Registers a parameterless replacement factory for the target type.
     /// </summary>
-    /// <param name="factory">The factory called by <see cref="ShimDispatcher.New{T}"/> while this context is active.</param>
-    /// <returns>The registered rule.</returns>
     public NewShimRule Returns(Func<T> factory)
     {
         ArgumentNullException.ThrowIfNull(factory);
         _context.EnsureActive();
         return _context.Registry.RegisterNewRule(typeof(T), () => factory(), _context.ContextId);
+    }
+
+    /// <summary>
+    /// Registers an args-based replacement factory for the target type.
+    /// The factory receives the boxed constructor arguments in declaration order.
+    /// </summary>
+    public NewShimRule Returns(Func<object?[], T> argsFactory)
+    {
+        ArgumentNullException.ThrowIfNull(argsFactory);
+        _context.EnsureActive();
+        return _context.Registry.RegisterNewRule(typeof(T), args => argsFactory(args), _context.ContextId);
+    }
+
+    /// <summary>
+    /// Registers a <see cref="ShimConstructorContext"/>-based replacement factory for the target type.
+    /// </summary>
+    public NewShimRule Returns(Func<ShimConstructorContext, T> contextFactory)
+    {
+        ArgumentNullException.ThrowIfNull(contextFactory);
+        _context.EnsureActive();
+        return _context.Registry.RegisterNewRuleWithContext(typeof(T), ctx => contextFactory(ctx), _context.ContextId);
     }
 
     private static void ValidateTargetType(Type targetType)

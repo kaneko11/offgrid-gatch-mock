@@ -15,15 +15,45 @@ public sealed class NewShimRule
         RegistrationOrder = registrationOrder;
     }
 
+    internal NewShimRule(Type targetType, Func<object?[], object?> argsFactory, Guid contextId, long registrationOrder)
+    {
+        ArgumentNullException.ThrowIfNull(targetType);
+        ArgumentNullException.ThrowIfNull(argsFactory);
+        TargetType = targetType;
+        ArgsFactory = argsFactory;
+        ContextId = contextId;
+        RegistrationOrder = registrationOrder;
+    }
+
+    internal NewShimRule(Type targetType, Func<ShimConstructorContext, object?> contextFactory, Guid contextId, long registrationOrder)
+    {
+        ArgumentNullException.ThrowIfNull(targetType);
+        ArgumentNullException.ThrowIfNull(contextFactory);
+        TargetType = targetType;
+        ContextFactory = contextFactory;
+        ContextId = contextId;
+        RegistrationOrder = registrationOrder;
+    }
+
     /// <summary>
     /// Gets the target type this rule replaces.
     /// </summary>
     public Type TargetType { get; }
 
     /// <summary>
-    /// Gets the replacement factory.
+    /// Gets the parameterless replacement factory, or <see langword="null"/> when an args/context factory is registered.
     /// </summary>
-    public Func<object?> Factory { get; }
+    public Func<object?>? Factory { get; }
+
+    /// <summary>
+    /// Gets the args-based replacement factory, or <see langword="null"/> when a parameterless or context factory is registered.
+    /// </summary>
+    public Func<object?[], object?>? ArgsFactory { get; }
+
+    /// <summary>
+    /// Gets the context-based replacement factory, or <see langword="null"/> when a parameterless or args factory is registered.
+    /// </summary>
+    public Func<ShimConstructorContext, object?>? ContextFactory { get; }
 
     /// <summary>
     /// Gets the context ID that owns this rule.
@@ -35,8 +65,14 @@ public sealed class NewShimRule
     /// </summary>
     public long RegistrationOrder { get; }
 
-    internal object? CreateInstance()
+    internal object? CreateInstance() => CreateInstanceWithArgs([]);
+
+    internal object? CreateInstanceWithArgs(object?[] args)
     {
-        return Factory();
+        if (ContextFactory is not null)
+            return ContextFactory(new ShimConstructorContext(TargetType, args));
+        if (ArgsFactory is not null)
+            return ArgsFactory(args);
+        return Factory?.Invoke();
     }
 }
