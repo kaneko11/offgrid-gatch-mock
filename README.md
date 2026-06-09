@@ -1,68 +1,185 @@
 # MiniMockito.Net
 
-MiniMockito.Net is a lightweight .NET mocking framework designed to feel natural with Visual Studio 2022 and MSTest.
+.NET / MSTest 向けの軽量モックフレームワークです。  
+interface mock / spy を中心に、v2 で class proxy（public virtual メソッド）をサポートします。
 
-It is not a Microsoft Fakes replacement. v1 focuses on interface mock / spy workflows. v2 adds class proxy support for public virtual methods on public non-sealed classes.
+Microsoft Fakes の代替ではありません。proxy ベースでできないこと（`new` の差し替え、static メソッド等）は別パッケージ `MiniMockito.Shims.Experimental` に分離しています。
 
-## What v2 Can Do
+---
 
-- Create interface mocks with `Mock.Of<T>()`
-- Create interface spies with `Spy.Of<T>(realInstance)`
-- Create class mocks with `Mock.Class<T>()`
-- Create class spies and partial mocks with `Spy.Class<T>()` or `Mock.Class<T>(ClassMockOptions.CallBase)`
-- Record invocations with method, arguments, timestamp, sequence number, return value, exception, thread ID, and mock ID
-- Stub calls with `When`, `ThenReturn`, `ThenThrow`, `ThenAnswer`, and `ThenReturnSequence`
-- Match arguments with `Any`, `Eq`, `Is`, `Null`, `NotNull`, and `InRange`
-- Capture arguments with `Capture<T>()`
-- Verify calls with `Times.Once`, `Exactly`, `Never`, `AtLeast`, and `AtMost`
-- Check `VerifyNoInteractions` and `VerifyNoMoreInteractions`
-- Verify order across multiple mocks and spies with `InOrder`
-- Return natural async defaults for `Task`, `Task<T>`, `ValueTask`, and `ValueTask<T>`
-- Use strict or lenient mock behavior
+## 目次
 
-## What v2 Cannot Do
+1. [できること / できないこと](#1-できること--できないこと)
+2. [インストール / ビルド](#2-インストール--ビルド)
+3. [他プロジェクトからの使い方](#3-他プロジェクトからの使い方)
+4. [Interface Mock](#4-interface-mock)
+5. [Interface Spy](#5-interface-spy)
+6. [Class Proxy](#6-class-proxy)
+7. [Class Spy / Partial Mock](#7-class-spy--partial-mock)
+8. [スタブ](#8-スタブ)
+9. [マッチャー](#9-マッチャー)
+10. [Captor（引数キャプチャ）](#10-captor引数キャプチャ)
+11. [検証（Verify）](#11-検証verify)
+12. [InOrder（順序検証）](#12-inorder順序検証)
+13. [Strict / Lenient](#13-strict--lenient)
+14. [非同期メソッド](#14-非同期メソッド)
+15. [エラーメッセージ](#15-エラーメッセージ)
+16. [Experimental Shims（new / static の差し替え）](#16-experimental-shimsnew--static-の差し替え)
+17. [既知の制約](#17-既知の制約)
 
-- Intercept direct `new SomeClass()` calls
-- Mock static methods
-- Mock sealed classes
-- Intercept non-virtual methods
-- Intercept private methods
-- Intercept constructors
-- Rewrite IL at runtime
-- Use CLR profiler API based shims
-- Transparently replace .NET Framework or BCL calls
+---
 
-These high-risk shim scenarios are intentionally outside the main package. If they are explored later, they should live in a separate experimental package such as `MiniMockito.Shims.Experimental`.
+## 1. できること / できないこと
 
-## Installation / Local Build
+### v2 でできること
 
-This repository currently builds from source.
+- `Mock.Of<T>()` で interface モックを作成
+- `Spy.Of<T>(realInstance)` で interface spy を作成
+- `Mock.Class<T>()` で class モックを作成
+- `Spy.Class<T>()` / `Mock.Class<T>(ClassMockOptions.CallBase)` で class spy / partial mock を作成
+- メソッド・引数・タイムスタンプ・戻り値・例外・スレッド ID・モック ID を記録
+- `When` / `ThenReturn` / `ThenThrow` / `ThenAnswer` / `ThenReturnSequence` でスタブを設定
+- `Any` / `Eq` / `Is` / `Null` / `NotNull` / `InRange` で引数マッチング
+- `Capture<T>()` で引数キャプチャ
+- `Times.Once` / `Exactly` / `Never` / `AtLeast` / `AtMost` で呼び出し検証
+- `VerifyNoInteractions` / `VerifyNoMoreInteractions`
+- `InOrder` で複数モック間の順序検証
+- `Task` / `Task<T>` / `ValueTask` / `ValueTask<T>` のデフォルト非同期戻り値
 
-```bash
+### v2 でできないこと
+
+| 機能 | 対応状況 |
+|------|---------|
+| `new SomeClass()` の差し替え | ❌ → `MiniMockito.Shims.Experimental` |
+| static メソッドのモック | ❌ → `MiniMockito.Shims.Experimental`（user-defined のみ） |
+| sealed class のモック | ❌ |
+| non-virtual メソッドの差し替え | ❌ |
+| private メソッドの差し替え | ❌ |
+| コンストラクタの差し替え | ❌ → `MiniMockito.Shims.Experimental` |
+| runtime IL rewrite | ❌ |
+| CLR Profiler API ベースの shim | ❌ |
+| BCL / .NET Framework の呼び出し差し替え | ❌ |
+
+---
+
+## 2. インストール / ビルド
+
+現在はソースからビルドします。
+
+```powershell
 dotnet restore
 dotnet build
 dotnet test
 ```
 
-Projects:
+プロジェクト構成:
 
-- `src/MiniMockito/MiniMockito.csproj`
-- `tests/MiniMockito.Tests/MiniMockito.Tests.csproj`
-- `samples/MiniMockito.Sample/MiniMockito.Sample.csproj`
-- `samples/MiniMockito.Sample.MSTest/MiniMockito.Sample.MSTest.csproj`
+```
+src/
+  MiniMockito/                              ← ライブラリ本体 (v2)
+  MiniMockito.Shims.Experimental/          ← 実験的パッケージ (new / static shim)
 
-## Visual Studio 2022 + MSTest
+tests/
+  MiniMockito.Tests/                        ← v2 テスト (77件)
+  MiniMockito.Shims.Experimental.Tests/    ← Shims テスト (235件)
+  MiniMockito.Shims.Experimental.Sample/   ← Shims テスト用サンプルアセンブリ
 
-Add a project reference or NuGet package reference to your MSTest project, then import the API:
+samples/
+  MiniMockito.Sample/                       ← コンソールサンプル
+  MiniMockito.Sample.MSTest/               ← MSTest 実行可能サンプル (6件)
+```
+
+**テスト結果（現時点）:**
+
+| アセンブリ | 合格 | 失敗 |
+|-----------|------|------|
+| MiniMockito.Tests | 77 | 0 |
+| MiniMockito.Shims.Experimental.Tests | 235 | 0 |
+| MiniMockito.Sample.MSTest | 6 | 0 |
+| **合計** | **318** | **0** |
+
+---
+
+## 3. 他プロジェクトからの使い方
+
+### 方法 A: プロジェクト参照（同一リポジトリ・monorepo の場合）
+
+テストプロジェクトの `.csproj` に追加します。
+
+```xml
+<!-- MiniMockito 本体のみ使う場合 -->
+<ItemGroup>
+  <ProjectReference Include="パス/to/offgrid-gatch-mock/src/MiniMockito/MiniMockito.csproj" />
+</ItemGroup>
+
+<!-- Experimental Shims も使う場合（実験的） -->
+<ItemGroup>
+  <ProjectReference Include="パス/to/offgrid-gatch-mock/src/MiniMockito/MiniMockito.csproj" />
+  <ProjectReference Include="パス/to/offgrid-gatch-mock/src/MiniMockito.Shims.Experimental/MiniMockito.Shims.Experimental.csproj" />
+</ItemGroup>
+```
+
+### 方法 B: ローカル NuGet パック（別リポジトリから使う場合）
+
+```powershell
+# 1a. パッケージを生成（本体）
+dotnet pack src/MiniMockito -c Release -o artifacts
+# → artifacts/MiniMockito.Net.0.2.0-preview.5.nupkg
+# → artifacts/MiniMockito.Net.0.2.0-preview.5.snupkg  ← シンボルパッケージ
+
+# 1b. Experimental Shims も使う場合（実験的）
+dotnet pack src/MiniMockito.Shims.Experimental -c Release -o artifacts
+# → artifacts/MiniMockito.Shims.Experimental.0.1.0-alpha.3.nupkg
+# → artifacts/MiniMockito.Shims.Experimental.0.1.0-alpha.3.snupkg
+
+# 1c. 両方まとめてパックする
+dotnet pack -c Release -o artifacts
+
+# 2. ローカルフィードを登録（テストプロジェクト側で実行）
+dotnet nuget add source C:\path\to\artifacts --name local-minimockito
+
+# 3. テストプロジェクトの .csproj に追加
+# <PackageReference Include="MiniMockito.Net" Version="0.2.0-preview.5" />
+# <PackageReference Include="MiniMockito.Shims.Experimental" Version="0.1.0-alpha.3" />  ← 実験的
+```
+
+**Shims パッケージに含まれるもの:**
+
+| ファイル | 内容 |
+|---------|------|
+| `lib/net8.0/MiniMockito.Shims.Experimental.dll` | ライブラリ本体 |
+| `lib/net8.0/MiniMockito.Shims.Experimental.xml` | XML ドキュメント（IDE インテリセンス用） |
+| `README.md` | パッケージ説明 |
+| `Mono.Cecil 0.11.6` | 依存パッケージ（自動で取得される） |
+
+### 使い始め
 
 ```csharp
 using MiniMockito;
-using static MiniMockito.Mock;
+using static MiniMockito.Mock;   // When / Verify / Any などをクラス名なしで使う
+
+[TestClass]
+public class MyServiceTests
+{
+    [TestMethod]
+    public void GetDisplayName_Returns_Mocked_Value()
+    {
+        var repo = Mock.Of<IUserRepository>();
+
+        When(() => repo.FindById(Any<int>()))
+            .ThenReturn("mocked-user");
+
+        var sut = new MyService(repo);
+        Assert.AreEqual("mocked-user", sut.GetDisplayName(1));
+
+        Verify(() => repo.FindById(1), Times.Once());
+    }
+}
 ```
 
-The MSTest sample project in `samples/MiniMockito.Sample.MSTest` contains executable examples for interface mocks, spies, class proxies, matchers, captors, and async methods.
+---
 
-## Interface Mock
+## 4. Interface Mock
 
 ```csharp
 var service = Mock.Of<IUserService>();
@@ -74,9 +191,12 @@ Assert.AreEqual("abc", service.GetName(123));
 Verify(() => service.GetName(123), Times.Once());
 ```
 
-Lenient mocks return default values for unstubbed calls. Interface mocks use `DispatchProxy`, so `T` must be an interface.
+lenient モックはスタブが未設定の呼び出しにデフォルト値を返します。  
+interface mock は `DispatchProxy` ベースなので `T` は interface である必要があります。
 
-## Interface Spy
+---
+
+## 5. Interface Spy
 
 ```csharp
 var realService = new RealUserService();
@@ -85,13 +205,15 @@ var spy = Spy.Of<IUserService>(realService);
 When(() => spy.GetName(0))
     .ThenReturn("stubbed");
 
-Assert.AreEqual("stubbed", spy.GetName(0));
-Assert.AreEqual("real-7", spy.GetName(7));
+Assert.AreEqual("stubbed", spy.GetName(0));   // stub あり → "stubbed"
+Assert.AreEqual("real-7", spy.GetName(7));    // stub なし → real 実装に委譲
 ```
 
-Interface spies are still interface proxies. When no stub matches, the call is delegated to the supplied real instance.
+スタブに一致しない呼び出しは、渡した実インスタンスに委譲されます。
 
-## Class Proxy
+---
+
+## 6. Class Proxy
 
 ```csharp
 var repository = Mock.Class<UserRepository>();
@@ -103,14 +225,16 @@ Assert.AreEqual("mocked", repository.FindName(1));
 Verify(() => repository.FindName(1), Times.Once());
 ```
 
-Class proxy support is intentionally narrow:
+class proxy の制約:
 
-- `T` must be a public non-sealed class
-- `T` must have a public or protected parameterless constructor
-- only public virtual methods are intercepted
-- non-virtual, static, private, generic, `ref`, and `out` methods are not supported
+- `T` は public かつ non-sealed クラス
+- `T` に public または protected のパラメーターなしコンストラクターが必要
+- **public virtual メソッドのみ** インターセプト可能
+- non-virtual / static / private / generic / `ref` / `out` は非対応
 
-## Class Spy / Partial Mock
+---
+
+## 7. Class Spy / Partial Mock
 
 ```csharp
 var calculator = Spy.Class<TaxCalculator>();
@@ -118,41 +242,48 @@ var calculator = Spy.Class<TaxCalculator>();
 When(() => calculator.GetRate("test"))
     .ThenReturn(0.20m);
 
-Assert.AreEqual(0.20m, calculator.GetRate("test"));
-Assert.AreEqual(0.10m, calculator.GetRate("default"));
+Assert.AreEqual(0.20m, calculator.GetRate("test"));    // stub あり → 0.20m
+Assert.AreEqual(0.10m, calculator.GetRate("default")); // stub なし → base 実装
 ```
 
-`Spy.Class<T>()` and `Mock.Class<T>(ClassMockOptions.CallBase)` call the base implementation when no stub matches. Stubbed public virtual methods use the configured stub behavior.
+`Spy.Class<T>()` と `Mock.Class<T>(ClassMockOptions.CallBase)` はスタブに一致しない呼び出しで base 実装を呼びます。
 
-## Stubbing
+---
+
+## 8. スタブ
 
 ```csharp
+// 例外をスロー
 When(() => service.GetName(1))
     .ThenThrow(new InvalidOperationException());
 
+// 引数に応じて動的に返す
 When(() => service.GetName(Any<int>()))
     .ThenAnswer(ctx => "id=" + ctx.Arguments[0]);
 
+// 順番に返す（末尾の値を繰り返す）
 When(() => service.GetName(2))
     .ThenReturnSequence("a", "b", "c");
 ```
 
-`ThenReturnSequence` returns values in order and repeats the last value after the sequence is exhausted.
+---
 
-## Matchers
+## 9. マッチャー
 
 ```csharp
 When(() => service.GetName(Any<int>())).ThenReturn("any");
 When(() => service.GetName(Eq(10))).ThenReturn("ten");
-When(() => service.GetName(Is<int>(value => value > 0))).ThenReturn("positive");
+When(() => service.GetName(Is<int>(v => v > 0))).ThenReturn("positive");
 When(() => service.Find(Null<string>())).ThenReturn("missing");
 When(() => service.Find(NotNull<string>())).ThenReturn("present");
 When(() => service.GetName(InRange(1, 5))).ThenReturn("range");
 ```
 
-Arguments without matchers use equality matching.
+マッチャーを使わない引数は等値比較（equality）でマッチします。
 
-## Captor
+---
+
+## 10. Captor（引数キャプチャ）
 
 ```csharp
 var captor = Capture<string>();
@@ -164,9 +295,11 @@ Verify(() => service.Save(captor.Value));
 Assert.AreEqual("abc", captor.CapturedValue);
 ```
 
-Captor values are collected only after successful verification.
+Captor の値は `Verify` が成功した後にのみセットされます。
 
-## Verification
+---
+
+## 11. 検証（Verify）
 
 ```csharp
 service.Save("abc");
@@ -176,9 +309,12 @@ Verify(() => service.Save("missing"), Times.Never());
 VerifyNoMoreInteractions(service);
 ```
 
-Successful `Verify` calls mark matching invocations as verified. `Verify(() => mock.Method(...))` evaluates the expression in verification mode and does not record that expression evaluation as a normal invocation.
+`Verify` に成功すると、一致した invocation が「検証済み」としてマークされます。  
+`Verify(...)` 自体の式評価は invocation として記録されません。
 
-## InOrder
+---
+
+## 12. InOrder（順序検証）
 
 ```csharp
 var first = Mock.Of<IWorkflowStep>();
@@ -194,42 +330,46 @@ order.Verify(() => second.Save());
 order.Verify(() => first.End());
 ```
 
-`InOrder` uses the global invocation sequence number, so it can verify ordering across multiple interface mocks, class proxies, and spies.
+`InOrder` はグローバルな invocation シーケンス番号を使うため、  
+interface mock・class proxy・spy をまたいだ順序検証が可能です。
 
-## Strict / Lenient
+---
+
+## 13. Strict / Lenient
 
 ```csharp
-var lenient = Mock.Of<IUserService>();
-var strict = Mock.Of<IUserService>(MockBehavior.Strict);
-var strictClass = Mock.Class<UserRepository>(MockBehavior.Strict);
+var lenient = Mock.Of<IUserService>();                             // lenient（デフォルト）
+var strict  = Mock.Of<IUserService>(MockBehavior.Strict);         // strict
+var strictClass = Mock.Class<UserRepository>(MockBehavior.Strict); // class proxy strict
 ```
 
-- Lenient: unstubbed calls return default values.
-- Strict: unstubbed calls throw a `MockException` or `ClassProxyException` with method and argument diagnostics.
+- **Lenient**: スタブ未設定の呼び出しはデフォルト値を返します。
+- **Strict**: スタブ未設定の呼び出しは `MockException` / `ClassProxyException` をスローします。
 
-## Async Behavior
+---
 
-Unstubbed async returns are completed defaults:
+## 14. 非同期メソッド
 
-- `Task` returns `Task.CompletedTask`
-- `Task<T>` returns a completed task with `default(T)`
-- `ValueTask` returns a completed default value task
-- `ValueTask<T>` returns a completed value task with `default(T)`
+スタブ未設定の非同期メソッドは完了済みのデフォルト値を返します:
 
-`ThenReturn` can be used with the logical result value:
+- `Task` → `Task.CompletedTask`
+- `Task<T>` → `default(T)` の完了済み Task
+- `ValueTask` / `ValueTask<T>` → 同様
 
 ```csharp
 When(() => service.GetNameAsync(Any<int>()))
-    .ThenReturn("abc");
+    .ThenReturn("abc");   // 論理的な戻り値を直接渡す
 
 Assert.AreEqual("abc", await service.GetNameAsync(123));
 ```
 
-## Error Message Shape
+---
 
-Verification failures include labels intended for IDE and CI diagnostics:
+## 15. エラーメッセージ
 
-```text
+検証失敗時のメッセージ（IDE / CI 診断用のラベル付き）:
+
+```
 Wanted:
 Actual invocations:
 Matching invocations:
@@ -240,9 +380,9 @@ Arguments:
 Closest recorded calls:
 ```
 
-Class proxy failures include class-specific diagnostics:
+class proxy 失敗時のメッセージ:
 
-```text
+```
 Target class:
 Method:
 Reason:
@@ -251,18 +391,127 @@ Unsupported methods:
 Hint:
 ```
 
-## Known Constraints
+---
 
-- Interface mocks and spies require interfaces.
-- Class mocks and class spies require public non-sealed classes with a public or protected parameterless constructor.
-- Class proxy only intercepts public virtual methods.
-- Static, sealed, non-virtual, private, constructor, and direct `new` interception are not implemented.
-- Runtime IL rewrite and profiler API based shims are not implemented.
-- Generic methods and `ref` / `out` parameters are outside the class proxy MVP.
-- MiniMockito does not depend on Moq, NSubstitute, FakeItEasy, JustMock, Rhino Mocks, Microsoft Fakes, or Castle DynamicProxy.
+## 16. Experimental Shims（new / static の差し替え）
 
-## Future Experimental Shims
+> **⚠️ 実験的パッケージです。API は予告なく変更されます。本番コードへの組み込みは避けてください。**
 
-The main `MiniMockito` package remains proxy-based. Future research for direct `new`, static, sealed, and non-virtual mocking should be isolated in `MiniMockito.Shims.Experimental`.
+`MiniMockito.Shims.Experimental` は `new SomeClass()` や user-defined static メソッドを  
+テスト中に差し替えるための実験的な仕組みを提供します。
 
-The first recommended experiment is a Roslyn analyzer / code fix that suggests adapter, factory, or injectable clock seams for hard-to-mock code. Runtime IL rewriting, CLR Profiling API, and method patching are higher-risk options and should not be part of the stable main package.
+Mono.Cecil で IL をビルド後にリライトし、isolated AssemblyLoadContext (ALC) で動かします。  
+元のアセンブリは**絶対に上書きしません**。
+
+### 必須設定
+
+```csharp
+// AssemblyInfo.cs — process-wide な state の並列衝突を防ぐ
+[assembly: DoNotParallelize]
+```
+
+### new SomeClass() の差し替え
+
+```csharp
+using MiniMockito.Shims.Experimental;
+
+[TestClass]
+[DoNotParallelize]
+public class RepositoryShimTests
+{
+    [TestMethod]
+    public void New_UserRepository_IsShimmed()
+    {
+        using var harness = NewInterceptionHarness.Create()
+            .WithTarget<UserRepository>()        // 差し替え対象クラスを登録
+            .RewriteTargetTypeAssembly();        // IL をリライト（temp dir へ書き出し）
+
+        var fake = harness.CreateFake<UserRepository>("fake");
+
+        using (ShimContext.Create())
+        {
+            harness.RegisterShim<UserRepository>(fake);
+
+            var service = harness.Create<UserService>();  // リライト済み ALC から生成
+            var result = harness.Invoke<string>(
+                service, nameof(UserService.GetDisplayName), 1);
+
+            Assert.AreEqual("fake-1", result);
+        }
+    }
+}
+```
+
+### コンストラクタ引数マッチャー
+
+```csharp
+using static MiniMockito.Shims.Experimental.ShimArg;
+
+using (ShimContext.Create())
+{
+    // Eq("prod") に一致するコンストラクタ呼び出しだけ差し替える
+    harness.RegisterShimWithMatchers<UserRepository>(fake, Eq<string>("prod"));
+
+    // Any<string>() — 任意の string に一致
+    // Is<string>(s => s.StartsWith("prod")) — 述語マッチ
+}
+```
+
+### ShimCaptor（コンストラクタ引数をキャプチャ）
+
+```csharp
+var captor = ShimCaptor.For<string>();
+
+using (ShimContext.Create())
+{
+    harness.RegisterShimWithMatchers<UserRepository>(fake, captor);
+    // ... テスト実行 ...
+}
+
+Assert.AreEqual("prod", captor.Value);
+```
+
+### user-defined static メソッドの差し替え
+
+```csharp
+var fixedTime = new DateTime(2025, 1, 1, 0, 0, 0, DateTimeKind.Utc);
+
+using var harness = NewInterceptionHarness.Create()
+    .WithStaticTarget(typeof(StaticClock))   // static 差し替え対象を登録
+    .RewriteTargetTypeAssembly();
+
+using (ShimContext.Create())
+{
+    Shim.Static<DateTime>(typeof(StaticClock).FullName!, "Now")
+        .Returns(fixedTime);
+
+    var service = harness.Create<TimedService>();
+    var result = harness.Invoke<string>(service, nameof(TimedService.GetTimedName), 1);
+
+    Assert.AreEqual($"1-{fixedTime:yyyyMMdd}", result);
+}
+```
+
+### Experimental Shims の制約
+
+| 制約 | 理由 |
+|------|------|
+| `[assembly: DoNotParallelize]` 必須 | ShimDispatcher が process-wide state を持つ |
+| BCL static メソッドは差し替え不可 | `DateTime.Now`、`File.ReadAllText` 等 |
+| generic static メソッドはスキップ | Mono.Cecil での取り扱いが複雑 |
+| original assembly は変更しない | 一時ディレクトリへの書き出しのみ |
+| `using (ShimContext.Create())` 必須 | Dispose しないと rule が残る |
+
+詳細は [`docs/shims-experimental-quickstart.md`](docs/shims-experimental-quickstart.md) を参照してください。
+
+---
+
+## 17. 既知の制約
+
+- interface mock / spy は interface のみ対応
+- class mock / spy は public non-sealed クラスかつ public / protected parameterless コンストラクター必須
+- class proxy は public virtual メソッドのみインターセプト
+- static / sealed / non-virtual / private / コンストラクターの直接 new インターセプトは本体では非対応
+- runtime IL rewrite / profiler API ベースの shim は本体では非対応
+- generic メソッドと `ref` / `out` パラメーターは class proxy MVP 対象外
+- Moq / NSubstitute / FakeItEasy / JustMock / Rhino Mocks / Microsoft Fakes / Castle DynamicProxy への依存なし

@@ -12,9 +12,19 @@
     <Authors>MiniMockito.Net contributors</Authors>
     <Description>Experimental shim infrastructure for MiniMockito.Net (Phase 14.5 milestone). Provides build-time IL rewrite for newobj interception and user-defined static method mocking via an isolated AssemblyLoadContext. NOT stable — API may change in future phases. BCL static methods, generic methods, and expression-based shim APIs are not supported. Parallel test execution requires [assembly: DoNotParallelize].</Description>
     <PackageTags>mocking;testing;mstest;shims;experimental</PackageTags>
+    <PackageLicenseExpression>MIT</PackageLicenseExpression>
+    <PackageReadmeFile>README.md</PackageReadmeFile>
+    <PackageProjectUrl>https://github.com/kaneko11/offgrid-gatch-mock</PackageProjectUrl>
+    <RepositoryUrl>https://github.com/kaneko11/offgrid-gatch-mock</RepositoryUrl>
     <RepositoryType>git</RepositoryType>
     <GenerateDocumentationFile>true</GenerateDocumentationFile>
+    <IncludeSymbols>true</IncludeSymbols>
+    <SymbolPackageFormat>snupkg</SymbolPackageFormat>
   </PropertyGroup>
+
+  <ItemGroup>
+    <None Include="README.md" Pack="true" PackagePath="\" />
+  </ItemGroup>
 
   <ItemGroup>
     <PackageReference Include="Mono.Cecil" Version="0.11.6" />
