@@ -664,3 +664,74 @@ MiniMockito 本体は proxy-based mocking に集中します。
 `MiniMockito.Shims.Experimental` は、必要になった場合だけ別 package として検証します。最初の実験は analyzer / source generator / adapter migration helper を優先し、runtime IL rewrite、CLR Profiling API、detour / method patching は後続の isolated PoC に回します。
 
 この方針により、Visual Studio 2022 + MSTest で自然に使える軽量 mock framework という本体の目的を維持しながら、高リスクな shim 領域を段階的に調査できます。
+
+## 12. Phase 5: integration and safety
+
+### 目的
+
+Phase 4 の `newobj` rewrite PoC をテストで扱いやすい形に整理し、安全性と診断を強化します。
+新しい差し替え対象は追加しません。
+
+### 変更概要
+
+#### ShimContext safety
+
+- `ShimContext.ActiveContextCount` 静的プロパティを追加。CreateからDisposeまでの未解放コンテキスト数を追跡し、テストのリーク検出に使用できます。
+- `ShimContext.CleanupException` プロパティを追加。`Dispose()` 中のクリーンアップ失敗を格納して再スローします。
+- `RequireCurrent()` のエラーメッセージを改善。「コンテキストが存在しない」と「コンテキストが Dispose 済み」を区別します。
+- Nested context の挙動をコード・テスト・ドキュメントで明確化しました。
+- async / threading に関する注意事項を `ShimContext` の XML doc に追記しました。
+
+#### Parallel test safety
+
+- `[assembly: DoNotParallelize]` は引き続き有効。
+- 各テストクラスにも `[DoNotParallelize]` を追加。
+- 並列実行が危険な理由 (process-wide state、async-local の境界、rewrite 出力ファイルの競合) を docs に追記。
+
+#### Rewrite diagnostics
+
+- `RewriteResult.RewrittenCallSiteDescriptions` プロパティ追加 (`Diagnostics` から `"Rewrote "` 始まりの行を抽出)。
+- `RewriteResult.SkippedCallSiteDescriptions` プロパティ追加 (`Diagnostics` から `"Skipped "` 始まりの行を抽出)。
+- `RewriteResult.ToSummary()` メソッド追加。人間が読みやすいテキスト形式の概要を返します。
+
+#### NewInterceptionHarness テストヘルパー
+
+`NewInterceptionHarness` クラスを追加。以下を統合した fluent API です。
+
+- `WithTarget<T>()` — allowlist に追加
+- `RewriteTargetTypeAssembly()` — 最初の target type の assembly を書き換え
+- `RewriteAssembly(string)` — 明示的パスの assembly を書き換え
+- `Create<TService>()` — 書き換え済み assembly からサービスのインスタンスを生成
+- `CreateFake<TTarget>(params object[])` — 書き換え済み assembly から fake インスタンスを生成
+- `RegisterShim<TTarget>(object)` — 書き換え済み型を使って ShimContext にルール登録
+- `Invoke<TResult>(object, string, params object[])` — リフレクション経由のメソッド呼び出し
+- `GetRewrittenType(Type)` — 書き換え済み load context の `Type` を取得
+- `LastRewriteResult` — 最後の rewrite 結果
+
+### 重要な注意事項
+
+- `MiniMockito.Shims.Experimental` は **experimental** パッケージです。本体 MiniMockito の安定 API ではありません。
+- BCL 型は対象外です。
+- static method は対象外です。
+- constructor arguments は対象外です。
+- generic 型は対象外です。
+- **parallel test は危険です。** `[DoNotParallelize]` を必ず付けてください。
+- Visual Studio Test Explorer での完全統合は未対応です。
+
+### この Phase で実装しなかったもの
+
+- static method mocking
+- BCL type 差し替え
+- constructor arguments
+- generic classes
+- runtime IL rewrite
+- CLR Profiling API
+- detour / method patching
+- production assembly in-place rewrite
+
+### 次に推奨する Phase
+
+- `NewInterceptionHarness` の API を feedback を元に洗練する
+- Dispose 漏れを自動検出する TestBase クラスの提供を検討する
+- async state machine 内の `newobj` への対応可否を調査する
+- `ShimContext` の process-wide / context-local 境界についての追加検証
