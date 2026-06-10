@@ -23,7 +23,7 @@ public sealed class ArgumentCaptor<T>
         {
             lock (_syncRoot)
             {
-                return _values.Count == 0 ? default : _values[^1];
+                return _values.Count == 0 ? default : _values[_values.Count - 1];
             }
         }
     }

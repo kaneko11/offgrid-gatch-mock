@@ -31,7 +31,7 @@ public class StubBuilder
     /// <param name="exception">The exception to throw.</param>
     public void ThenThrow(Exception exception)
     {
-        ArgumentNullException.ThrowIfNull(exception);
+        ThrowHelper.ThrowIfNull(exception);
         AddRule(new ThrowBehavior(exception));
     }
 
@@ -41,7 +41,7 @@ public class StubBuilder
     /// <param name="answer">The callback used to produce the return value or side effect.</param>
     public void ThenAnswer(Func<StubContext, object?> answer)
     {
-        ArgumentNullException.ThrowIfNull(answer);
+        ThrowHelper.ThrowIfNull(answer);
         AddRule(new AnswerBehavior(answer));
     }
 

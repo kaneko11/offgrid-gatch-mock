@@ -22,10 +22,10 @@ public static class ClassProxyInvocationDispatcher
     /// <returns>The return value to pass back to the generated override.</returns>
     public static object? Invoke(object proxy, MethodInfo targetMethod, object?[] args, string baseInvokerName)
     {
-        ArgumentNullException.ThrowIfNull(proxy);
-        ArgumentNullException.ThrowIfNull(targetMethod);
-        ArgumentNullException.ThrowIfNull(args);
-        ArgumentException.ThrowIfNullOrWhiteSpace(baseInvokerName);
+        ThrowHelper.ThrowIfNull(proxy);
+        ThrowHelper.ThrowIfNull(targetMethod);
+        ThrowHelper.ThrowIfNull(args);
+        ThrowHelper.ThrowIfNullOrWhiteSpace(baseInvokerName);
 
         MockState state;
         try

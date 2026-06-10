@@ -11,11 +11,22 @@ internal static class ClassProxyMethodEmitter
         .GetMethod(nameof(MethodBase.GetMethodFromHandle), [typeof(RuntimeMethodHandle)])
         ?? throw new InvalidOperationException("MethodBase.GetMethodFromHandle could not be found.");
 
-    private static readonly MethodInfo InvokeMethod = typeof(ClassProxyInvocationDispatcher)
-        .GetMethod(
-            nameof(ClassProxyInvocationDispatcher.Invoke),
-            BindingFlags.Public | BindingFlags.Static,
-            [typeof(object), typeof(MethodInfo), typeof(object?[]), typeof(string)])
+    private static readonly MethodInfo InvokeMethod =
+#if NET5_0_OR_GREATER
+        typeof(ClassProxyInvocationDispatcher)
+            .GetMethod(
+                nameof(ClassProxyInvocationDispatcher.Invoke),
+                BindingFlags.Public | BindingFlags.Static,
+                [typeof(object), typeof(MethodInfo), typeof(object?[]), typeof(string)])
+#else
+        typeof(ClassProxyInvocationDispatcher)
+            .GetMethod(
+                nameof(ClassProxyInvocationDispatcher.Invoke),
+                BindingFlags.Public | BindingFlags.Static,
+                null,
+                new Type[] { typeof(object), typeof(MethodInfo), typeof(object[]), typeof(string) },
+                null)
+#endif
         ?? throw new InvalidOperationException("ClassProxyInvocationDispatcher.Invoke could not be found.");
 
     internal static void EmitOverride(TypeBuilder typeBuilder, MethodInfo method)

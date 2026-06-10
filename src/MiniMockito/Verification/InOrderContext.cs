@@ -15,7 +15,7 @@ public sealed class InOrderContext
 
     internal InOrderContext(IEnumerable<object> mocks)
     {
-        ArgumentNullException.ThrowIfNull(mocks);
+        ThrowHelper.ThrowIfNull(mocks);
 
         _states = mocks
             .Select(MockRepository.Default.GetState)
@@ -35,7 +35,7 @@ public sealed class InOrderContext
     /// <param name="invocation">The expected invocation expression.</param>
     public void Verify(Expression<Action> invocation)
     {
-        ArgumentNullException.ThrowIfNull(invocation);
+        ThrowHelper.ThrowIfNull(invocation);
         var setup = VerificationSetupFactory.Create(invocation.Body);
         Verify(setup);
     }
@@ -47,7 +47,7 @@ public sealed class InOrderContext
     /// <param name="invocation">The expected invocation expression.</param>
     public void Verify<TResult>(Expression<Func<TResult>> invocation)
     {
-        ArgumentNullException.ThrowIfNull(invocation);
+        ThrowHelper.ThrowIfNull(invocation);
         var setup = VerificationSetupFactory.Create(invocation.Body);
         Verify(setup);
     }

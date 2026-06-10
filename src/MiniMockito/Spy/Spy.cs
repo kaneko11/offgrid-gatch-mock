@@ -42,7 +42,7 @@ public static class Spy
                 $"MiniMockito can only create interface spies in v1. Target type '{targetType.FullName}' is not an interface.");
         }
 
-        ArgumentNullException.ThrowIfNull(realInstance);
+        ThrowHelper.ThrowIfNull(realInstance);
 
         if (!targetType.IsInstanceOfType(realInstance))
         {

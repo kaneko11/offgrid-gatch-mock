@@ -8,7 +8,7 @@ internal sealed class ReturnBehavior : StubBehavior
 
     internal ReturnBehavior(IEnumerable<object?> values)
     {
-        ArgumentNullException.ThrowIfNull(values);
+        ThrowHelper.ThrowIfNull(values);
         _values = values.ToArray();
         if (_values.Length == 0)
         {
@@ -28,7 +28,7 @@ internal sealed class ReturnBehavior : StubBehavior
         {
             value = _nextIndex < _values.Length
                 ? _values[_nextIndex++]
-                : _values[^1];
+                : _values[_values.Length - 1];
         }
 
         return ReturnValueAdapter.ToReturnValue(value, returnType);
