@@ -1,4 +1,4 @@
-namespace MiniMockito.Shims.Experimental;
+﻿namespace MiniMockito.Shims.Experimental;
 
 /// <summary>
 /// Reports the result of a rewrite dry-run scan.
@@ -13,9 +13,9 @@ public sealed class RewriteReport
     /// <param name="scanResult">The newobj scan result.</param>
     public RewriteReport(string assemblyPath, IReadOnlyList<RewriteTarget> targets, NewObjScanResult scanResult)
     {
-        ArgumentException.ThrowIfNullOrWhiteSpace(assemblyPath);
-        ArgumentNullException.ThrowIfNull(targets);
-        ArgumentNullException.ThrowIfNull(scanResult);
+        ThrowHelper.ThrowIfNullOrWhiteSpace(assemblyPath);
+        ThrowHelper.ThrowIfNull(targets);
+        ThrowHelper.ThrowIfNull(scanResult);
         AssemblyPath = Path.GetFullPath(assemblyPath);
         Targets = targets;
         ScanResult = scanResult;

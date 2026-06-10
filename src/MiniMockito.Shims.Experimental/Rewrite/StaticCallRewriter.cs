@@ -1,4 +1,4 @@
-using Mono.Cecil;
+﻿using Mono.Cecil;
 using Mono.Cecil.Cil;
 using CecilMethodAttrs = Mono.Cecil.MethodAttributes;
 using CecilParamAttrs = Mono.Cecil.ParameterAttributes;
@@ -55,9 +55,9 @@ public static class StaticCallRewriter
         RewriteOptions options,
         IList<string> diagnostics)
     {
-        ArgumentNullException.ThrowIfNull(module);
-        ArgumentNullException.ThrowIfNull(options);
-        ArgumentNullException.ThrowIfNull(diagnostics);
+        ThrowHelper.ThrowIfNull(module);
+        ThrowHelper.ThrowIfNull(options);
+        ThrowHelper.ThrowIfNull(diagnostics);
 
         var targetTypeNames = options.StaticTargetTypes
             .Select(t => t.FullName)
@@ -452,8 +452,8 @@ public static class StaticCallRewriter
 
     private static string SanitizeName(string name)
     {
-        var tick = name.IndexOf('`', StringComparison.Ordinal);
-        return tick >= 0 ? name[..tick] : name;
+        var tick = name.IndexOf('`');
+        return tick >= 0 ? name.Substring(0, tick) : name;
     }
 
     // ─────────────────────────────────────────────────────────────────────────
@@ -502,7 +502,7 @@ public static class StaticCallRewriter
 
     private static string RemoveGenericArity(string fullName)
     {
-        var tick = fullName.IndexOf('`', StringComparison.Ordinal);
-        return tick < 0 ? fullName : fullName[..tick];
+        var tick = fullName.IndexOf('`');
+        return tick < 0 ? fullName : fullName.Substring(0, tick);
     }
 }

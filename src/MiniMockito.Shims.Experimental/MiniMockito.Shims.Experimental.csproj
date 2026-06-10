@@ -1,6 +1,6 @@
 <Project Sdk="Microsoft.NET.Sdk">
   <PropertyGroup>
-    <TargetFramework>net8.0</TargetFramework>
+    <TargetFrameworks>net8.0;net48</TargetFrameworks>
     <LangVersion>latest</LangVersion>
     <Nullable>enable</Nullable>
     <ImplicitUsings>enable</ImplicitUsings>
@@ -18,6 +18,9 @@
     <RepositoryUrl>https://github.com/kaneko11/offgrid-gatch-mock</RepositoryUrl>
     <RepositoryType>git</RepositoryType>
     <GenerateDocumentationFile>true</GenerateDocumentationFile>
+    <!-- CS1574: cref references to types excluded via #if (e.g. ShimAssemblyLoadContext) on net48 -->
+    <!-- CS8604: nullable reference warnings from EqualityComparer/HashSet on net48 (analysis-only) -->
+    <NoWarn>$(NoWarn);CS1574;CS8604</NoWarn>
     <IncludeSymbols>true</IncludeSymbols>
     <SymbolPackageFormat>snupkg</SymbolPackageFormat>
   </PropertyGroup>

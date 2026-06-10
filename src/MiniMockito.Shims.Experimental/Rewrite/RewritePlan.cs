@@ -1,4 +1,4 @@
-namespace MiniMockito.Shims.Experimental;
+﻿namespace MiniMockito.Shims.Experimental;
 
 /// <summary>
 /// Describes a dry-run rewrite scan request.
@@ -12,8 +12,8 @@ public sealed class RewritePlan
     /// <param name="targets">The allowlisted target types.</param>
     public RewritePlan(string assemblyPath, IEnumerable<RewriteTarget> targets)
     {
-        ArgumentException.ThrowIfNullOrWhiteSpace(assemblyPath);
-        ArgumentNullException.ThrowIfNull(targets);
+        ThrowHelper.ThrowIfNullOrWhiteSpace(assemblyPath);
+        ThrowHelper.ThrowIfNull(targets);
         AssemblyPath = Path.GetFullPath(assemblyPath);
         Targets = targets.ToArray();
     }
@@ -36,7 +36,7 @@ public sealed class RewritePlan
     /// <returns>A rewrite plan.</returns>
     public static RewritePlan FromOptions(string assemblyPath, NewObjScanOptions options)
     {
-        ArgumentNullException.ThrowIfNull(options);
+        ThrowHelper.ThrowIfNull(options);
         return new RewritePlan(assemblyPath, options.TargetTypes.Select(type => new RewriteTarget(type)));
     }
 }

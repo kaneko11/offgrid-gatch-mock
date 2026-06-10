@@ -1,4 +1,4 @@
-using System.Reflection;
+﻿using System.Reflection;
 
 namespace MiniMockito.Shims.Experimental;
 
@@ -15,9 +15,9 @@ public sealed class StaticMethodKey : IEquatable<StaticMethodKey>
     /// <param name="parameterTypeFullNames">Full names of parameter types in declaration order.</param>
     public StaticMethodKey(string declaringTypeFullName, string methodName, string[] parameterTypeFullNames)
     {
-        ArgumentException.ThrowIfNullOrWhiteSpace(declaringTypeFullName);
-        ArgumentException.ThrowIfNullOrWhiteSpace(methodName);
-        ArgumentNullException.ThrowIfNull(parameterTypeFullNames);
+        ThrowHelper.ThrowIfNullOrWhiteSpace(declaringTypeFullName);
+        ThrowHelper.ThrowIfNullOrWhiteSpace(methodName);
+        ThrowHelper.ThrowIfNull(parameterTypeFullNames);
 
         DeclaringTypeFullName = declaringTypeFullName;
         MethodName = methodName;
@@ -37,7 +37,7 @@ public sealed class StaticMethodKey : IEquatable<StaticMethodKey>
     /// <summary>Creates a key from a <see cref="MethodInfo"/>.</summary>
     public static StaticMethodKey From(MethodInfo method)
     {
-        ArgumentNullException.ThrowIfNull(method);
+        ThrowHelper.ThrowIfNull(method);
         return new StaticMethodKey(
             method.DeclaringType?.FullName ?? method.DeclaringType?.Name ?? string.Empty,
             method.Name,
@@ -47,9 +47,9 @@ public sealed class StaticMethodKey : IEquatable<StaticMethodKey>
     /// <summary>Creates a key from a <see cref="Type"/>, method name, and parameter types.</summary>
     public static StaticMethodKey From(Type declaringType, string methodName, Type[] paramTypes)
     {
-        ArgumentNullException.ThrowIfNull(declaringType);
-        ArgumentException.ThrowIfNullOrWhiteSpace(methodName);
-        ArgumentNullException.ThrowIfNull(paramTypes);
+        ThrowHelper.ThrowIfNull(declaringType);
+        ThrowHelper.ThrowIfNullOrWhiteSpace(methodName);
+        ThrowHelper.ThrowIfNull(paramTypes);
 
         return new StaticMethodKey(
             declaringType.FullName ?? declaringType.Name,
@@ -67,7 +67,12 @@ public sealed class StaticMethodKey : IEquatable<StaticMethodKey>
     public override bool Equals(object? obj) => obj is StaticMethodKey k && Equals(k);
 
     /// <inheritdoc/>
-    public override int GetHashCode() => _key.GetHashCode(StringComparison.Ordinal);
+    public override int GetHashCode() =>
+#if NET5_0_OR_GREATER
+        _key.GetHashCode(StringComparison.Ordinal);
+#else
+        StringComparer.Ordinal.GetHashCode(_key);
+#endif
 
     /// <inheritdoc/>
     public override string ToString() => _key;

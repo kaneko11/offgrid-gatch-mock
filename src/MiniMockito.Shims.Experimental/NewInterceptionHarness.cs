@@ -1,4 +1,4 @@
-using System.Reflection;
+﻿using System.Reflection;
 
 namespace MiniMockito.Shims.Experimental;
 
@@ -64,7 +64,7 @@ public sealed class NewInterceptionHarness : IDisposable
     /// <summary>Adds <typeparamref name="T"/> to the allowlist of <c>newobj</c> target types to rewrite.</summary>
     public NewInterceptionHarness WithTarget<T>() where T : class
     {
-        ObjectDisposedException.ThrowIf(_disposed, this);
+        ThrowHelper.ThrowIfDisposed(_disposed, this);
         _targetTypes.Add(typeof(T));
         return this;
     }
@@ -76,8 +76,8 @@ public sealed class NewInterceptionHarness : IDisposable
     /// </summary>
     public NewInterceptionHarness WithStaticTarget(Type staticTargetType)
     {
-        ObjectDisposedException.ThrowIf(_disposed, this);
-        ArgumentNullException.ThrowIfNull(staticTargetType);
+        ThrowHelper.ThrowIfDisposed(_disposed, this);
+        ThrowHelper.ThrowIfNull(staticTargetType);
         _staticTargetTypes.Add(staticTargetType);
         return this;
     }
@@ -90,7 +90,7 @@ public sealed class NewInterceptionHarness : IDisposable
     /// <exception cref="InvalidOperationException">No target types have been registered.</exception>
     public NewInterceptionHarness RewriteTargetTypeAssembly()
     {
-        ObjectDisposedException.ThrowIf(_disposed, this);
+        ThrowHelper.ThrowIfDisposed(_disposed, this);
 
         if (_targetTypes.Count == 0 && _staticTargetTypes.Count == 0)
         {
@@ -110,8 +110,8 @@ public sealed class NewInterceptionHarness : IDisposable
     /// <param name="inputAssemblyPath">The path to the assembly to rewrite.</param>
     public NewInterceptionHarness RewriteAssembly(string inputAssemblyPath)
     {
-        ObjectDisposedException.ThrowIf(_disposed, this);
-        ArgumentException.ThrowIfNullOrWhiteSpace(inputAssemblyPath);
+        ThrowHelper.ThrowIfDisposed(_disposed, this);
+        ThrowHelper.ThrowIfNullOrWhiteSpace(inputAssemblyPath);
 
         var outputPath = CreateOutputPath(inputAssemblyPath);
         OutputAssemblyPath = outputPath;
@@ -140,7 +140,7 @@ public sealed class NewInterceptionHarness : IDisposable
     /// </summary>
     public object Create<TService>() where TService : class
     {
-        ObjectDisposedException.ThrowIf(_disposed, this);
+        ThrowHelper.ThrowIfDisposed(_disposed, this);
         EnsureRewritten();
         var type = GetRewrittenType(typeof(TService));
         return Activator.CreateInstance(type)
@@ -154,7 +154,7 @@ public sealed class NewInterceptionHarness : IDisposable
     /// </summary>
     public object CreateFake<TTarget>(params object[] constructorArgs) where TTarget : class
     {
-        ObjectDisposedException.ThrowIf(_disposed, this);
+        ThrowHelper.ThrowIfDisposed(_disposed, this);
         EnsureRewritten();
         var type = GetRewrittenType(typeof(TTarget));
         return (constructorArgs.Length == 0
@@ -175,8 +175,8 @@ public sealed class NewInterceptionHarness : IDisposable
     /// <exception cref="ShimException">No active <see cref="ShimContext"/> exists.</exception>
     public void RegisterShim<TTarget>(object fakeInstance) where TTarget : class
     {
-        ObjectDisposedException.ThrowIf(_disposed, this);
-        ArgumentNullException.ThrowIfNull(fakeInstance);
+        ThrowHelper.ThrowIfDisposed(_disposed, this);
+        ThrowHelper.ThrowIfNull(fakeInstance);
         EnsureRewritten();
 
         var rewrittenType = GetRewrittenType(typeof(TTarget));
@@ -198,8 +198,8 @@ public sealed class NewInterceptionHarness : IDisposable
         object fakeInstance,
         params IShimArgumentMatcher[] matchers) where TTarget : class
     {
-        ObjectDisposedException.ThrowIf(_disposed, this);
-        ArgumentNullException.ThrowIfNull(fakeInstance);
+        ThrowHelper.ThrowIfDisposed(_disposed, this);
+        ThrowHelper.ThrowIfNull(fakeInstance);
         EnsureRewritten();
 
         var rewrittenType = GetRewrittenType(typeof(TTarget));
@@ -220,8 +220,8 @@ public sealed class NewInterceptionHarness : IDisposable
     /// <param name="args">Arguments forwarded to the method.</param>
     public TResult Invoke<TResult>(object instance, string methodName, params object[] args)
     {
-        ArgumentNullException.ThrowIfNull(instance);
-        ArgumentException.ThrowIfNullOrWhiteSpace(methodName);
+        ThrowHelper.ThrowIfNull(instance);
+        ThrowHelper.ThrowIfNullOrWhiteSpace(methodName);
 
         var method = instance.GetType().GetMethod(methodName, BindingFlags.Instance | BindingFlags.Public)
             ?? throw new InvalidOperationException(
@@ -238,7 +238,7 @@ public sealed class NewInterceptionHarness : IDisposable
     /// <param name="originalType">The type from the original (non-rewritten) assembly.</param>
     public Type GetRewrittenType(Type originalType)
     {
-        ArgumentNullException.ThrowIfNull(originalType);
+        ThrowHelper.ThrowIfNull(originalType);
         EnsureRewritten();
 
         var typeName = originalType.FullName
@@ -257,7 +257,7 @@ public sealed class NewInterceptionHarness : IDisposable
     /// </exception>
     public WeakReference GetUnloadReference()
     {
-        ObjectDisposedException.ThrowIf(_disposed, this);
+        ThrowHelper.ThrowIfDisposed(_disposed, this);
         if (_loader is null)
         {
             throw new InvalidOperationException(
@@ -275,7 +275,7 @@ public sealed class NewInterceptionHarness : IDisposable
     /// </exception>
     public ShimAlcDiagnostics GetAlcDiagnostics()
     {
-        ObjectDisposedException.ThrowIf(_disposed, this);
+        ThrowHelper.ThrowIfDisposed(_disposed, this);
         if (_loader is null)
         {
             throw new InvalidOperationException(

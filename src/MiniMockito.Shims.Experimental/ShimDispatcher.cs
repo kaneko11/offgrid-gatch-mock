@@ -1,4 +1,4 @@
-namespace MiniMockito.Shims.Experimental;
+﻿namespace MiniMockito.Shims.Experimental;
 
 /// <summary>
 /// Entry point intended for rewritten constructor call sites.
@@ -53,7 +53,7 @@ public static class ShimDispatcher
     /// <param name="args">Boxed constructor arguments in declaration order.</param>
     public static T NewWithArgs<T>(object?[] args)
     {
-        ArgumentNullException.ThrowIfNull(args);
+        ThrowHelper.ThrowIfNull(args);
         var targetType = typeof(T);
         var context = ShimContext.Current;
 

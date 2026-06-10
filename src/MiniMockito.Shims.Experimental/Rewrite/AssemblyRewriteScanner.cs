@@ -1,4 +1,4 @@
-using System.Reflection;
+﻿using System.Reflection;
 using System.Reflection.Emit;
 
 namespace MiniMockito.Shims.Experimental;
@@ -51,7 +51,7 @@ public static class AssemblyRewriteScanner
     /// <returns>A dry-run rewrite report.</returns>
     public static RewriteReport Scan(RewritePlan plan)
     {
-        ArgumentNullException.ThrowIfNull(plan);
+        ThrowHelper.ThrowIfNull(plan);
         if (!File.Exists(plan.AssemblyPath))
         {
             throw new ShimRewriteException(string.Join(
@@ -278,10 +278,10 @@ public static class AssemblyRewriteScanner
 
         var genericTypeDefinition = type.GetGenericTypeDefinition();
         var name = genericTypeDefinition.FullName ?? genericTypeDefinition.Name;
-        var tickIndex = name.IndexOf('`', StringComparison.Ordinal);
+        var tickIndex = name.IndexOf('`');
         if (tickIndex >= 0)
         {
-            name = name[..tickIndex];
+            name = name.Substring(0, tickIndex);
         }
 
         return $"{name}<{string.Join(", ", type.GetGenericArguments().Select(GetFriendlyTypeName))}>";

@@ -1,4 +1,4 @@
-namespace MiniMockito.Shims.Experimental;
+﻿namespace MiniMockito.Shims.Experimental;
 
 /// <summary>
 /// Entry point for experimental shim rule setup.
@@ -63,8 +63,8 @@ public static class Shim
         string methodName,
         params Type[] parameterTypes)
     {
-        ArgumentException.ThrowIfNullOrWhiteSpace(declaringTypeFullName);
-        ArgumentException.ThrowIfNullOrWhiteSpace(methodName);
+        ThrowHelper.ThrowIfNullOrWhiteSpace(declaringTypeFullName);
+        ThrowHelper.ThrowIfNullOrWhiteSpace(methodName);
         var context = ShimContext.RequireCurrent();
         var key = new StaticMethodKey(
             declaringTypeFullName,
@@ -85,7 +85,7 @@ public static class Shim
         string methodName,
         params Type[] parameterTypes)
     {
-        ArgumentNullException.ThrowIfNull(declaringType);
+        ThrowHelper.ThrowIfNull(declaringType);
         return Static<TResult>(declaringType.FullName ?? declaringType.Name, methodName, parameterTypes);
     }
 
@@ -102,8 +102,8 @@ public static class Shim
         string methodName,
         params Type[] parameterTypes)
     {
-        ArgumentException.ThrowIfNullOrWhiteSpace(declaringTypeFullName);
-        ArgumentException.ThrowIfNullOrWhiteSpace(methodName);
+        ThrowHelper.ThrowIfNullOrWhiteSpace(declaringTypeFullName);
+        ThrowHelper.ThrowIfNullOrWhiteSpace(methodName);
         var context = ShimContext.RequireCurrent();
         var key = new StaticMethodKey(
             declaringTypeFullName,
@@ -123,7 +123,7 @@ public static class Shim
         string methodName,
         params Type[] parameterTypes)
     {
-        ArgumentNullException.ThrowIfNull(declaringType);
+        ThrowHelper.ThrowIfNull(declaringType);
         return Static(declaringType.FullName ?? declaringType.Name, methodName, parameterTypes);
     }
 }
