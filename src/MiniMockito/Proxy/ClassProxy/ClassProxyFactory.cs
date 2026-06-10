@@ -12,7 +12,7 @@ internal sealed class ClassProxyFactory
     internal T Create<T>(ClassMockOptions options)
         where T : class
     {
-        ArgumentNullException.ThrowIfNull(options);
+        ThrowHelper.ThrowIfNull(options);
 
         var targetType = typeof(T);
         ClassProxyValidation.ValidateTarget(targetType);

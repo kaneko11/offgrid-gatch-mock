@@ -22,7 +22,7 @@ internal sealed class MockRepository
 
     internal MockState GetState(object mock)
     {
-        ArgumentNullException.ThrowIfNull(mock);
+        ThrowHelper.ThrowIfNull(mock);
 
         if (_states.TryGetValue(mock, out var state))
         {

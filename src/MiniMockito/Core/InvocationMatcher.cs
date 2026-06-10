@@ -15,8 +15,8 @@ public sealed class InvocationMatcher
     /// <param name="argumentMatchers">The argument matchers in parameter order.</param>
     public InvocationMatcher(MethodInfo method, IReadOnlyList<ArgumentMatcher> argumentMatchers)
     {
-        ArgumentNullException.ThrowIfNull(method);
-        ArgumentNullException.ThrowIfNull(argumentMatchers);
+        ThrowHelper.ThrowIfNull(method);
+        ThrowHelper.ThrowIfNull(argumentMatchers);
         Method = method;
         ArgumentMatchers = argumentMatchers;
     }
@@ -38,7 +38,7 @@ public sealed class InvocationMatcher
     /// <returns><see langword="true"/> when the invocation matches.</returns>
     public bool Matches(InvocationRecord invocation)
     {
-        ArgumentNullException.ThrowIfNull(invocation);
+        ThrowHelper.ThrowIfNull(invocation);
         return Matches(invocation.Method, invocation.Arguments);
     }
 
@@ -50,8 +50,8 @@ public sealed class InvocationMatcher
     /// <returns><see langword="true"/> when the method and arguments match.</returns>
     public bool Matches(MethodInfo method, IReadOnlyList<object?> arguments)
     {
-        ArgumentNullException.ThrowIfNull(method);
-        ArgumentNullException.ThrowIfNull(arguments);
+        ThrowHelper.ThrowIfNull(method);
+        ThrowHelper.ThrowIfNull(arguments);
         if (!Equals(Method, method) || ArgumentMatchers.Count != arguments.Count)
         {
             return false;

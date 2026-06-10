@@ -1,6 +1,6 @@
 <Project Sdk="Microsoft.NET.Sdk">
   <PropertyGroup>
-    <TargetFramework>net8.0</TargetFramework>
+    <TargetFrameworks>net8.0;net48</TargetFrameworks>
     <LangVersion>latest</LangVersion>
     <Nullable>enable</Nullable>
     <ImplicitUsings>enable</ImplicitUsings>
@@ -25,5 +25,10 @@
 
   <ItemGroup>
     <None Include="..\..\README.md" Pack="true" PackagePath="\" />
+  </ItemGroup>
+
+  <ItemGroup Condition="'$(TargetFramework)' == 'net48'">
+    <PackageReference Include="System.Reflection.DispatchProxy" Version="4.3.0" />
+    <PackageReference Include="System.Threading.Tasks.Extensions" Version="4.5.4" />
   </ItemGroup>
 </Project>

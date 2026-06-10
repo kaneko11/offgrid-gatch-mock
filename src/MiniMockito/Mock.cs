@@ -132,7 +132,7 @@ public static class Mock
     /// <returns>A builder used to configure the stub behavior.</returns>
     public static StubBuilder<TResult> When<TResult>(Expression<Func<TResult>> invocation)
     {
-        ArgumentNullException.ThrowIfNull(invocation);
+        ThrowHelper.ThrowIfNull(invocation);
         var setup = InvocationSetupFactory.Create(invocation.Body);
         return new StubBuilder<TResult>(setup.State, setup.Matcher, setup.ReturnType);
     }
@@ -144,7 +144,7 @@ public static class Mock
     /// <returns>A builder used to configure the stub behavior.</returns>
     public static StubBuilder When(Expression<Action> invocation)
     {
-        ArgumentNullException.ThrowIfNull(invocation);
+        ThrowHelper.ThrowIfNull(invocation);
         var setup = InvocationSetupFactory.Create(invocation.Body);
         return new StubBuilder(setup.State, setup.Matcher, setup.ReturnType);
     }
@@ -240,8 +240,8 @@ public static class Mock
     /// <param name="times">The expected invocation count rule.</param>
     public static void Verify(Expression<Action> invocation, Times times)
     {
-        ArgumentNullException.ThrowIfNull(invocation);
-        ArgumentNullException.ThrowIfNull(times);
+        ThrowHelper.ThrowIfNull(invocation);
+        ThrowHelper.ThrowIfNull(times);
         var setup = VerificationSetupFactory.Create(invocation.Body);
         VerificationEngine.Verify(setup, times);
     }
@@ -264,8 +264,8 @@ public static class Mock
     /// <param name="times">The expected invocation count rule.</param>
     public static void Verify<TResult>(Expression<Func<TResult>> invocation, Times times)
     {
-        ArgumentNullException.ThrowIfNull(invocation);
-        ArgumentNullException.ThrowIfNull(times);
+        ThrowHelper.ThrowIfNull(invocation);
+        ThrowHelper.ThrowIfNull(times);
         var setup = VerificationSetupFactory.Create(invocation.Body);
         VerificationEngine.Verify(setup, times);
     }

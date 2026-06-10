@@ -7,7 +7,7 @@ internal static class ClassProxyValidation
 {
     internal static IReadOnlyList<MethodInfo> ValidateTarget(Type targetType)
     {
-        ArgumentNullException.ThrowIfNull(targetType);
+        ThrowHelper.ThrowIfNull(targetType);
 
         var supports = GetMethodSupports(targetType);
 
@@ -65,8 +65,8 @@ internal static class ClassProxyValidation
 
     internal static void EnsureMethodSupported(Type targetType, MethodInfo method)
     {
-        ArgumentNullException.ThrowIfNull(targetType);
-        ArgumentNullException.ThrowIfNull(method);
+        ThrowHelper.ThrowIfNull(targetType);
+        ThrowHelper.ThrowIfNull(method);
 
         if (!targetType.IsClass)
         {
