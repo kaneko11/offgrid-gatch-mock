@@ -1,4 +1,4 @@
-namespace MiniMockito.Shims.Experimental;
+﻿namespace MiniMockito.Shims.Experimental;
 
 /// <summary>
 /// Describes a target type that may be considered by a rewrite dry-run scan.
@@ -11,7 +11,7 @@ public sealed class RewriteTarget
     /// <param name="targetType">The allowlisted target type.</param>
     public RewriteTarget(Type targetType)
     {
-        ArgumentNullException.ThrowIfNull(targetType);
+        ThrowHelper.ThrowIfNull(targetType);
         TargetType = targetType;
     }
 
@@ -27,7 +27,7 @@ public sealed class RewriteTarget
 
     internal bool Matches(Type candidateType)
     {
-        ArgumentNullException.ThrowIfNull(candidateType);
+        ThrowHelper.ThrowIfNull(candidateType);
         return string.Equals(TargetType.AssemblyQualifiedName, candidateType.AssemblyQualifiedName, StringComparison.Ordinal)
             || string.Equals(TargetType.FullName, candidateType.FullName, StringComparison.Ordinal);
     }

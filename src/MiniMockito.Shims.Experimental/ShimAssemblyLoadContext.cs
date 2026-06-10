@@ -1,8 +1,12 @@
 using System.Reflection;
+
+#if !NETFRAMEWORK
 using System.Runtime.Loader;
+#endif
 
 namespace MiniMockito.Shims.Experimental;
 
+#if !NETFRAMEWORK
 /// <summary>
 /// Isolated, collectible <see cref="AssemblyLoadContext"/> for loading rewritten assemblies
 /// during shim interception experiments.
@@ -56,7 +60,7 @@ public sealed class ShimAssemblyLoadContext : AssemblyLoadContext
             name: $"ShimIsolated-{Path.GetFileNameWithoutExtension(rewrittenAssemblyPath)}",
             isCollectible: true)
     {
-        ArgumentException.ThrowIfNullOrWhiteSpace(rewrittenAssemblyPath);
+        ThrowHelper.ThrowIfNullOrWhiteSpace(rewrittenAssemblyPath);
         RewrittenAssemblyPath = Path.GetFullPath(rewrittenAssemblyPath);
         _originalDirectory = originalAssemblyDirectory;
         _resolver = new AssemblyDependencyResolver(RewrittenAssemblyPath);
@@ -135,3 +139,4 @@ public sealed class ShimAssemblyLoadContext : AssemblyLoadContext
         return null;
     }
 }
+#endif

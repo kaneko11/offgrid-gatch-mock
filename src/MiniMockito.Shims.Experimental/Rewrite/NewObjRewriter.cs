@@ -1,4 +1,4 @@
-using Mono.Cecil;
+﻿using Mono.Cecil;
 using Mono.Cecil.Cil;
 
 namespace MiniMockito.Shims.Experimental;
@@ -16,9 +16,9 @@ public static class NewObjRewriter
     /// </summary>
     public static int Rewrite(ModuleDefinition module, RewriteOptions options, IList<string> diagnostics)
     {
-        ArgumentNullException.ThrowIfNull(module);
-        ArgumentNullException.ThrowIfNull(options);
-        ArgumentNullException.ThrowIfNull(diagnostics);
+        ThrowHelper.ThrowIfNull(module);
+        ThrowHelper.ThrowIfNull(options);
+        ThrowHelper.ThrowIfNull(diagnostics);
 
         var targetTypeNames = options.TargetTypes
             .Select(type => type.FullName)
@@ -288,8 +288,8 @@ public static class NewObjRewriter
     private static string GetWrapperMethodName(TypeReference declaringType, MethodReference constructor)
     {
         var typeName = declaringType.Name;
-        var tickIndex = typeName.IndexOf('`', StringComparison.Ordinal);
-        if (tickIndex >= 0) typeName = typeName[..tickIndex];
+        var tickIndex = typeName.IndexOf('`');
+        if (tickIndex >= 0) typeName = typeName.Substring(0, tickIndex);
 
         if (constructor.Parameters.Count == 0)
             return $"__Shims_New_{typeName}";
@@ -297,8 +297,8 @@ public static class NewObjRewriter
         var paramNames = string.Join("_", constructor.Parameters.Select(p =>
         {
             var name = p.ParameterType.Name;
-            var tick = name.IndexOf('`', StringComparison.Ordinal);
-            return tick >= 0 ? name[..tick] : name;
+            var tick = name.IndexOf('`');
+            return tick >= 0 ? name.Substring(0, tick) : name;
         }));
 
         return $"__Shims_New_{typeName}_{paramNames}";
@@ -363,7 +363,7 @@ public static class NewObjRewriter
 
     private static string RemoveGenericArity(string fullName)
     {
-        var tickIndex = fullName.IndexOf('`', StringComparison.Ordinal);
-        return tickIndex < 0 ? fullName : fullName[..tickIndex];
+        var tickIndex = fullName.IndexOf('`');
+        return tickIndex < 0 ? fullName : fullName.Substring(0, tickIndex);
     }
 }

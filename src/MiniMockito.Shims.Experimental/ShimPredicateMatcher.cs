@@ -1,4 +1,4 @@
-namespace MiniMockito.Shims.Experimental;
+﻿namespace MiniMockito.Shims.Experimental;
 
 internal sealed class ShimPredicateMatcher<T> : IShimArgumentMatcher
 {
@@ -6,7 +6,7 @@ internal sealed class ShimPredicateMatcher<T> : IShimArgumentMatcher
 
     internal ShimPredicateMatcher(Func<T?, bool> predicate)
     {
-        ArgumentNullException.ThrowIfNull(predicate);
+        ThrowHelper.ThrowIfNull(predicate);
         _predicate = predicate;
     }
 

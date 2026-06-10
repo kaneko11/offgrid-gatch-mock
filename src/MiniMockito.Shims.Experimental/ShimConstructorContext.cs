@@ -1,4 +1,4 @@
-namespace MiniMockito.Shims.Experimental;
+﻿namespace MiniMockito.Shims.Experimental;
 
 /// <summary>
 /// Provides constructor call information to args-aware shim factories registered via
@@ -11,8 +11,8 @@ public sealed class ShimConstructorContext
 {
     internal ShimConstructorContext(Type targetType, object?[] arguments)
     {
-        ArgumentNullException.ThrowIfNull(targetType);
-        ArgumentNullException.ThrowIfNull(arguments);
+        ThrowHelper.ThrowIfNull(targetType);
+        ThrowHelper.ThrowIfNull(arguments);
         TargetType = targetType;
         Arguments = arguments;
     }

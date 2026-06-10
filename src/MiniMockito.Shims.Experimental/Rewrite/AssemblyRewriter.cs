@@ -1,4 +1,4 @@
-using Mono.Cecil;
+﻿using Mono.Cecil;
 
 namespace MiniMockito.Shims.Experimental;
 
@@ -19,9 +19,9 @@ public static class AssemblyRewriter
         string outputAssemblyPath,
         RewriteOptions options)
     {
-        ArgumentException.ThrowIfNullOrWhiteSpace(inputAssemblyPath);
-        ArgumentException.ThrowIfNullOrWhiteSpace(outputAssemblyPath);
-        ArgumentNullException.ThrowIfNull(options);
+        ThrowHelper.ThrowIfNullOrWhiteSpace(inputAssemblyPath);
+        ThrowHelper.ThrowIfNullOrWhiteSpace(outputAssemblyPath);
+        ThrowHelper.ThrowIfNull(options);
 
         var inputFullPath = Path.GetFullPath(inputAssemblyPath);
         var outputFullPath = Path.GetFullPath(outputAssemblyPath);

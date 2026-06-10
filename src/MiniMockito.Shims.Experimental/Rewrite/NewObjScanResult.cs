@@ -1,4 +1,4 @@
-namespace MiniMockito.Shims.Experimental;
+﻿namespace MiniMockito.Shims.Experimental;
 
 /// <summary>
 /// Contains detected <c>newobj</c> call sites for a dry-run scan.
@@ -11,7 +11,7 @@ public sealed class NewObjScanResult
     /// <param name="callSites">The detected call sites.</param>
     public NewObjScanResult(IEnumerable<NewObjCallSite> callSites)
     {
-        ArgumentNullException.ThrowIfNull(callSites);
+        ThrowHelper.ThrowIfNull(callSites);
         CallSites = callSites.ToArray();
     }
 

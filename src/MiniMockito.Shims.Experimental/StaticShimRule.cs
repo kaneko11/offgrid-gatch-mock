@@ -1,4 +1,4 @@
-namespace MiniMockito.Shims.Experimental;
+﻿namespace MiniMockito.Shims.Experimental;
 
 /// <summary>
 /// Describes a registered replacement for a target static method call.
@@ -19,7 +19,7 @@ public sealed class StaticShimRule
         Func<object?[], object?> factory,
         IReadOnlyList<IShimArgumentMatcher>? matchers)
     {
-        ArgumentNullException.ThrowIfNull(factory);
+        ThrowHelper.ThrowIfNull(factory);
         Key = key;
         RegistrationOrder = registrationOrder;
         _factory = factory;
@@ -51,7 +51,7 @@ public sealed class StaticShimRule
         Exception thrownException,
         IReadOnlyList<IShimArgumentMatcher>? matchers)
     {
-        ArgumentNullException.ThrowIfNull(thrownException);
+        ThrowHelper.ThrowIfNull(thrownException);
         Key = key;
         RegistrationOrder = registrationOrder;
         _exception = thrownException;

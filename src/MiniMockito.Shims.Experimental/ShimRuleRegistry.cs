@@ -1,4 +1,4 @@
-namespace MiniMockito.Shims.Experimental;
+﻿namespace MiniMockito.Shims.Experimental;
 
 /// <summary>
 /// Stores shim rules for a single <see cref="ShimContext"/>.
@@ -57,8 +57,8 @@ public sealed class ShimRuleRegistry
     /// </summary>
     internal NewShimRule RegisterNewRule(Type targetType, Func<object?> factory, Guid contextId, IReadOnlyList<IShimArgumentMatcher>? matchers)
     {
-        ArgumentNullException.ThrowIfNull(targetType);
-        ArgumentNullException.ThrowIfNull(factory);
+        ThrowHelper.ThrowIfNull(targetType);
+        ThrowHelper.ThrowIfNull(factory);
 
         lock (_syncRoot)
         {
@@ -73,8 +73,8 @@ public sealed class ShimRuleRegistry
     /// </summary>
     internal NewShimRule RegisterNewRule(Type targetType, Func<object?[], object?> argsFactory, Guid contextId, IReadOnlyList<IShimArgumentMatcher>? matchers)
     {
-        ArgumentNullException.ThrowIfNull(targetType);
-        ArgumentNullException.ThrowIfNull(argsFactory);
+        ThrowHelper.ThrowIfNull(targetType);
+        ThrowHelper.ThrowIfNull(argsFactory);
 
         lock (_syncRoot)
         {
@@ -89,8 +89,8 @@ public sealed class ShimRuleRegistry
     /// </summary>
     internal NewShimRule RegisterNewRuleWithContext(Type targetType, Func<ShimConstructorContext, object?> contextFactory, Guid contextId, IReadOnlyList<IShimArgumentMatcher>? matchers)
     {
-        ArgumentNullException.ThrowIfNull(targetType);
-        ArgumentNullException.ThrowIfNull(contextFactory);
+        ThrowHelper.ThrowIfNull(targetType);
+        ThrowHelper.ThrowIfNull(contextFactory);
 
         lock (_syncRoot)
         {
@@ -107,7 +107,7 @@ public sealed class ShimRuleRegistry
     /// </summary>
     public bool TryFindNewRule(Type targetType, out NewShimRule? rule)
     {
-        ArgumentNullException.ThrowIfNull(targetType);
+        ThrowHelper.ThrowIfNull(targetType);
 
         lock (_syncRoot)
         {
@@ -135,7 +135,7 @@ public sealed class ShimRuleRegistry
     /// </remarks>
     internal bool TryFindNewRuleWithArgs(Type targetType, object?[] args, out NewShimRule? rule)
     {
-        ArgumentNullException.ThrowIfNull(targetType);
+        ThrowHelper.ThrowIfNull(targetType);
 
         lock (_syncRoot)
         {
@@ -171,7 +171,7 @@ public sealed class ShimRuleRegistry
         out NewShimRule? rule,
         out ShimDispatchDiagnostics diagnostics)
     {
-        ArgumentNullException.ThrowIfNull(targetType);
+        ThrowHelper.ThrowIfNull(targetType);
 
         lock (_syncRoot)
         {

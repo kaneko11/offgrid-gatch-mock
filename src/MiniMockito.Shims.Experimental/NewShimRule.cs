@@ -1,4 +1,4 @@
-namespace MiniMockito.Shims.Experimental;
+﻿namespace MiniMockito.Shims.Experimental;
 
 /// <summary>
 /// Describes a registered replacement for a target constructor call.
@@ -7,8 +7,8 @@ public sealed class NewShimRule
 {
     internal NewShimRule(Type targetType, Func<object?> factory, Guid contextId, long registrationOrder, IReadOnlyList<IShimArgumentMatcher>? matchers = null)
     {
-        ArgumentNullException.ThrowIfNull(targetType);
-        ArgumentNullException.ThrowIfNull(factory);
+        ThrowHelper.ThrowIfNull(targetType);
+        ThrowHelper.ThrowIfNull(factory);
         TargetType = targetType;
         Factory = factory;
         ContextId = contextId;
@@ -18,8 +18,8 @@ public sealed class NewShimRule
 
     internal NewShimRule(Type targetType, Func<object?[], object?> argsFactory, Guid contextId, long registrationOrder, IReadOnlyList<IShimArgumentMatcher>? matchers = null)
     {
-        ArgumentNullException.ThrowIfNull(targetType);
-        ArgumentNullException.ThrowIfNull(argsFactory);
+        ThrowHelper.ThrowIfNull(targetType);
+        ThrowHelper.ThrowIfNull(argsFactory);
         TargetType = targetType;
         ArgsFactory = argsFactory;
         ContextId = contextId;
@@ -29,8 +29,8 @@ public sealed class NewShimRule
 
     internal NewShimRule(Type targetType, Func<ShimConstructorContext, object?> contextFactory, Guid contextId, long registrationOrder, IReadOnlyList<IShimArgumentMatcher>? matchers = null)
     {
-        ArgumentNullException.ThrowIfNull(targetType);
-        ArgumentNullException.ThrowIfNull(contextFactory);
+        ThrowHelper.ThrowIfNull(targetType);
+        ThrowHelper.ThrowIfNull(contextFactory);
         TargetType = targetType;
         ContextFactory = contextFactory;
         ContextId = contextId;

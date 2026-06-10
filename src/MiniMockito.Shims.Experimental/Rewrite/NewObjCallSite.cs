@@ -1,4 +1,4 @@
-namespace MiniMockito.Shims.Experimental;
+﻿namespace MiniMockito.Shims.Experimental;
 
 /// <summary>
 /// Describes one detected <c>newobj</c> instruction.
@@ -18,11 +18,11 @@ public sealed class NewObjCallSite
         bool isSupported,
         string? unsupportedReason)
     {
-        ArgumentException.ThrowIfNullOrWhiteSpace(assemblyPath);
-        ArgumentException.ThrowIfNullOrWhiteSpace(targetTypeName);
-        ArgumentException.ThrowIfNullOrWhiteSpace(targetConstructor);
-        ArgumentException.ThrowIfNullOrWhiteSpace(callingTypeName);
-        ArgumentException.ThrowIfNullOrWhiteSpace(callingMethodName);
+        ThrowHelper.ThrowIfNullOrWhiteSpace(assemblyPath);
+        ThrowHelper.ThrowIfNullOrWhiteSpace(targetTypeName);
+        ThrowHelper.ThrowIfNullOrWhiteSpace(targetConstructor);
+        ThrowHelper.ThrowIfNullOrWhiteSpace(callingTypeName);
+        ThrowHelper.ThrowIfNullOrWhiteSpace(callingMethodName);
         AssemblyPath = Path.GetFullPath(assemblyPath);
         TargetTypeName = targetTypeName;
         TargetConstructor = targetConstructor;

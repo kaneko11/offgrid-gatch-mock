@@ -1,4 +1,4 @@
-namespace MiniMockito.Shims.Experimental;
+﻿namespace MiniMockito.Shims.Experimental;
 
 /// <summary>
 /// Registers replacement behavior for <c>new T()</c> shim calls.
@@ -11,7 +11,7 @@ public sealed class NewShimBuilder<T>
 
     internal NewShimBuilder(ShimContext context)
     {
-        ArgumentNullException.ThrowIfNull(context);
+        ThrowHelper.ThrowIfNull(context);
         ValidateTargetType(typeof(T));
         _context = context;
     }
@@ -42,7 +42,7 @@ public sealed class NewShimBuilder<T>
     /// </remarks>
     public NewShimBuilder<T> WithArguments(params IShimArgumentMatcher[] matchers)
     {
-        ArgumentNullException.ThrowIfNull(matchers);
+        ThrowHelper.ThrowIfNull(matchers);
         _context.EnsureActive();
         _matchers = matchers;
         return this;
@@ -62,7 +62,7 @@ public sealed class NewShimBuilder<T>
     /// </summary>
     public NewShimRule Returns(Func<T> factory)
     {
-        ArgumentNullException.ThrowIfNull(factory);
+        ThrowHelper.ThrowIfNull(factory);
         _context.EnsureActive();
         return _context.Registry.RegisterNewRule(typeof(T), () => factory(), _context.ContextId, _matchers);
     }
@@ -73,7 +73,7 @@ public sealed class NewShimBuilder<T>
     /// </summary>
     public NewShimRule Returns(Func<object?[], T> argsFactory)
     {
-        ArgumentNullException.ThrowIfNull(argsFactory);
+        ThrowHelper.ThrowIfNull(argsFactory);
         _context.EnsureActive();
         return _context.Registry.RegisterNewRule(typeof(T), args => argsFactory(args), _context.ContextId, _matchers);
     }
@@ -83,7 +83,7 @@ public sealed class NewShimBuilder<T>
     /// </summary>
     public NewShimRule Returns(Func<ShimConstructorContext, T> contextFactory)
     {
-        ArgumentNullException.ThrowIfNull(contextFactory);
+        ThrowHelper.ThrowIfNull(contextFactory);
         _context.EnsureActive();
         return _context.Registry.RegisterNewRuleWithContext(typeof(T), ctx => contextFactory(ctx), _context.ContextId, _matchers);
     }

@@ -1,4 +1,4 @@
-namespace MiniMockito.Shims.Experimental;
+﻿namespace MiniMockito.Shims.Experimental;
 
 /// <summary>
 /// Fluent builder for configuring a static method shim that returns <typeparamref name="TResult"/>.
@@ -36,7 +36,7 @@ public sealed class StaticShimBuilder<TResult>
     /// <summary>Registers a factory that produces the return value on each call.</summary>
     public void Returns(Func<TResult> factory)
     {
-        ArgumentNullException.ThrowIfNull(factory);
+        ThrowHelper.ThrowIfNull(factory);
         _context.EnsureActive();
         _context.StaticRegistry.RegisterRule(_key, _ => factory(), _matchers);
     }
@@ -44,7 +44,7 @@ public sealed class StaticShimBuilder<TResult>
     /// <summary>Registers a factory that receives the boxed arguments and returns the shimmed value.</summary>
     public void Returns(Func<object?[], TResult> factory)
     {
-        ArgumentNullException.ThrowIfNull(factory);
+        ThrowHelper.ThrowIfNull(factory);
         _context.EnsureActive();
         _context.StaticRegistry.RegisterRule(_key, args => factory(args), _matchers);
     }
@@ -52,7 +52,7 @@ public sealed class StaticShimBuilder<TResult>
     /// <summary>Registers a rule that throws <paramref name="exception"/> when the method is called.</summary>
     public void Throws(Exception exception)
     {
-        ArgumentNullException.ThrowIfNull(exception);
+        ThrowHelper.ThrowIfNull(exception);
         _context.EnsureActive();
         _context.StaticRegistry.RegisterThrowRule(_key, exception, _matchers);
     }
@@ -98,7 +98,7 @@ public sealed class StaticShimBuilder
     /// <summary>Registers a callback that is invoked with the boxed arguments.</summary>
     public void Callback(Action<object?[]> action)
     {
-        ArgumentNullException.ThrowIfNull(action);
+        ThrowHelper.ThrowIfNull(action);
         _context.EnsureActive();
         _context.StaticRegistry.RegisterVoidRule(_key, action, _matchers);
     }
@@ -106,7 +106,7 @@ public sealed class StaticShimBuilder
     /// <summary>Registers a rule that throws <paramref name="exception"/> when the method is called.</summary>
     public void Throws(Exception exception)
     {
-        ArgumentNullException.ThrowIfNull(exception);
+        ThrowHelper.ThrowIfNull(exception);
         _context.EnsureActive();
         _context.StaticRegistry.RegisterThrowRule(_key, exception, _matchers);
     }
