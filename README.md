@@ -660,6 +660,48 @@ using (ShimContext.Create())
 net48 プロジェクトから参照した場合、NuGet が自動的に net48 向けバイナリを選択します。  
 **モック API（`Mock.Of` / `When` / `Verify` 等）は net8.0 と完全に同じです。**
 
+### .NET Framework 4.8 + x86（PlatformTarget=x86）の interface mock / spy
+
+interface mock / spy は内部で proxy を生成します。生成方式は **ターゲットフレームワークごとに自動で選択**されます。
+
+- **net8.0:** `System.Reflection.DispatchProxy` backend
+- **net48:** `System.Runtime.Remoting.Proxies.RealProxy` backend
+
+これは、`.NET Framework 4.8` + `PlatformTarget=x86` の組み合わせで `DispatchProxy` が内部の
+`TypeBuilder.CreateTypeInfo()` に失敗し、次の例外が発生するためです。
+
+```text
+TypeLoadException: アクセスが拒否されました: 'MiniMockito.Proxy.MiniMockitoDispatchProxy'
+```
+
+net48 では `DispatchProxy` を使わず `RealProxy` fallback backend を使うため、**x86 でも interface
+mock / spy / strict / async（`Task` / `Task<T>` / `ValueTask` / `ValueTask<T>`）が動作します**。
+
+- **public API は完全に同一**です。`Mock.Of<T>()` / `Spy.Of<T>(real)` / `When` / `Verify` /
+  matcher / captor / `InOrder` などのコードはそのまま動きます。backend 選択は内部的に行われ、
+  利用者コードの変更は不要です。
+- `PlatformTarget=x86` / `Prefer32Bit=true` の MSTest プロジェクトでも interface mock / spy が使えます。
+- これは `MiniMockito.Shims.Experimental`（`new` / static 差し替え）とは **別問題・別レイヤー**です。
+  Shims は assembly rewrite + ALC、本件は interface proxy backend の話で、互いに独立しています。
+
+```xml
+<!-- x86 で実行する net48 MSTest プロジェクトの例 -->
+<PropertyGroup>
+  <TargetFramework>net48</TargetFramework>
+  <LangVersion>7.3</LangVersion>
+  <PlatformTarget>x86</PlatformTarget>
+  <Prefer32Bit>true</Prefer32Bit>
+</PropertyGroup>
+```
+
+```csharp
+// x86 でもこのコードはそのまま動作する（backend は自動で RealProxy が選択される）
+var repo = Mock.Of<IUserRepository>();
+When(() => repo.FindById(Any<int>())).ThenReturn("mocked");
+Assert.AreEqual("mocked", repo.FindById(1));
+Verify(() => repo.FindById(1), Times.Once());
+```
+
 ### csproj の設定
 
 ```xml

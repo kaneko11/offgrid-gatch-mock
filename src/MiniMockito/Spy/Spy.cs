@@ -50,16 +50,11 @@ public static class Spy
                 $"The real instance must implement '{targetType.FullName}'.");
         }
 
-        var proxy = DispatchProxy.Create<T, MiniMockitoDispatchProxy>();
-        if (proxy is null)
-        {
-            throw new MockException($"Failed to create a spy proxy for '{targetType.FullName}'.");
-        }
-
         var state = MockRepository.Default.CreateState(targetType, MockBehavior.Lenient, realInstance);
-        ((IMockProxy)(object)proxy).Configure(state);
-        MockRepository.Default.Register((object)proxy, state);
+        var interceptor = new MockStateInterceptor(state);
+        var proxy = InterfaceProxyFactorySelector.Resolve().Create(targetType, interceptor);
+        MockRepository.Default.Register(proxy, state);
 
-        return proxy;
+        return (T)proxy;
     }
 }
