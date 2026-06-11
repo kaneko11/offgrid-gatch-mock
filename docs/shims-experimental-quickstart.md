@@ -31,6 +31,9 @@
 | static method argument matcher（Any / Eq / Is） | ✅ 対応 (Phase 14) |
 | ShimCaptor で static method argument をキャプチャ | ✅ 対応 (Phase 14) |
 | newobj shim と static shim の同時利用 | ✅ 対応 (Phase 14) |
+| high-level facade `Shims.For<T>()`（new / static をまとめて扱う） | ✅ 対応 (Phase 17) |
+| `Create<IShimCreatable>()` による strongly-typed 生成 | ✅ 対応 (Phase 17) |
+| `CreateObject` + `Invoke` fallback | ✅ 対応 (Phase 17) |
 | ShimContext.Dispose() で確実に cleanup | ✅ 対応 |
 
 ---
@@ -127,7 +130,146 @@ experimental package は本体 release の安定性に影響しません。
 
 ---
 
-## 6. 使い方
+## 6. 使い方（high-level facade）— Phase 17
+
+`Shims` facade を使うと、`NewInterceptionHarness` / `ShimContext` / `RegisterShim` / reflection Invoke
+を直接意識せずに `new` / user-defined static method の差し替えが書けます。
+`Shims.For<TAnchor>()` の `TAnchor` は、差し替え対象の call site を含むアセンブリを決めるための型
+（通常は差し替えたい `new` / static 呼び出しを行うサービス型）です。
+
+> rewrite は `WithNew` / `WithStatic` の設定後、`New` / `Static` / `Create` / `CreateObject` /
+> `Invoke` / `CreateFake` の **初回呼び出し時に確定**します。確定後に `WithNew` / `WithStatic` を
+> 追加しようとすると `InvalidOperationException` を投げます。
+
+### 6.0.1 new 差し替え
+
+```csharp
+using static MiniMockito.Shims.Experimental.ShimArg;
+
+using (var shims = Shims.For<UserService>()
+                        .WithNew<UserRepository>())
+{
+    // 差し替え後の値を返す fake は、rewrite 済み ALC 上のインスタンスを使う。
+    var fakeRepo = shims.CreateFake<UserRepository>("fake");
+
+    shims.New<UserRepository>()
+         .WithArguments(Eq("prod"))     // 省略すると catch-all
+         .Returns(fakeRepo);
+
+    // 型 identity 問題を避けるため CreateObject + Invoke を使う（推奨）。
+    var service = shims.CreateObject(typeof(UserService).FullName);
+    var result = shims.Invoke<string>(service, "GetDisplayName", 1);
+    // → "fake-1"
+}
+```
+
+### 6.0.2 user-defined static method 差し替え
+
+```csharp
+using (var shims = Shims.For<TimedService>()
+                        .WithStatic(typeof(StaticClock)))
+{
+    shims.Static<string>(typeof(StaticClock), "GetName", typeof(int))
+         .WithArguments(ShimArg.Eq(1))
+         .Returns("fake-clock");
+
+    var service = shims.CreateObject(typeof(TimedService).FullName);
+    var result = shims.Invoke<string>(service, "GetDisplayName", 1);
+    // → "fake-clock"
+
+    // void static method は Callback / DoNothing / Throws が使える。
+    shims.Static(typeof(StaticClock), "LogCall", typeof(string))
+         .Callback(args => Console.WriteLine(args[0]));
+}
+```
+
+### 6.0.3 new + static 共存
+
+```csharp
+using (var shims = Shims.For<UserService>()
+                        .WithNew<UserRepository>()
+                        .WithStatic(typeof(StaticClock)))
+{
+    var fakeRepo = shims.CreateFake<UserRepository>("fake");
+    shims.New<UserRepository>().Returns(fakeRepo);
+
+    shims.Static<string>(typeof(StaticClock), "GetName", typeof(int))
+         .Returns("static-name");
+
+    // newobj shim と user-defined static shim が同じ session 内で共存する。
+}
+```
+
+### 6.0.4 Create() の扱いと CreateObject / Invoke fallback
+
+rewrite 済みの型は **isolated load context**（net8: collectible ALC、net48:
+`Assembly.Load(byte[])`）にロードされるため、rewrite 済みの concrete 型は default load context の
+同名型へキャストできません。したがって:
+
+- `Create<TConcrete>()`（例: `Create<UserService>()`）は **安全にキャストできない**ため、
+  分かりやすい `InvalidOperationException` を投げ、`CreateObject` + `Invoke` の使用を案内します。
+- `Create<T>()` が strongly-typed で成功するのは、**load context をまたいで identity を共有する
+  contract**（= このアセンブリで宣言された interface、`IShimCreatable`）を指定した場合だけです。
+
+```csharp
+// ✅ 動くパターン: 共有 contract IShimCreatable を実装したサービス
+//    （CreatableService : IShimCreatable）
+using (var shims = Shims.For<CreatableService>().WithNew<UserRepository>())
+{
+    var fakeRepo = shims.CreateFake<UserRepository>("fake");
+    shims.New<UserRepository>().Returns(fakeRepo);
+
+    IShimCreatable service = shims.Create<IShimCreatable>();
+    var result = service.Describe();   // 差し替えが効いた状態で呼べる
+}
+
+// ✅ 一般的なパターン（推奨）: CreateObject + Invoke
+using (var shims = Shims.For<UserService>().WithNew<UserRepository>())
+{
+    var fakeRepo = shims.CreateFake<UserRepository>("fake");
+    shims.New<UserRepository>().Returns(fakeRepo);
+
+    var service = shims.CreateObject(typeof(UserService).FullName);
+    var result = shims.Invoke<string>(service, "GetDisplayName", 1);
+}
+
+// ❌ Create<UserService>() は InvalidOperationException を投げる:
+//    "Create<T>() cannot safely return a strongly-typed instance for this type. ...
+//     Use instead: var obj = shims.CreateObject(...); shims.Invoke<TResult>(obj, ...)."
+```
+
+### 6.0.5 net48 / C# 7.3 での high-level facade
+
+API は net8.0 と完全に同じです。C# 7.3 では `using var` が使えないため `using` statement を使います。
+
+```csharp
+[TestClass]
+[DoNotParallelize]
+public sealed class Net48HighLevelTests
+{
+    [TestMethod]
+    public void ParameterlessNew_IsShimmed()
+    {
+        using (Shims shims = Shims.For<Net48UserService>().WithNew<Net48UserRepository>())
+        {
+            object fakeRepo = shims.CreateFake<Net48UserRepository>("fake");
+            shims.New<Net48UserRepository>().Returns(fakeRepo);
+
+            object service = shims.CreateObject(typeof(Net48UserService).FullName);
+            string result = shims.Invoke<string>(service, "GetDisplayName", 1);
+
+            Assert.AreEqual("fake-1", result);
+        }
+    }
+}
+```
+
+---
+
+## 6b. Advanced — low-level API（NewInterceptionHarness / ShimContext）
+
+> 以下は `Shims` facade が内部で利用している低レベル API です。細かい制御が必要な場合に使います。
+> 通常は上記 high-level facade（セクション 6）を推奨します。
 
 ### 6.1 parameterless constructor new shim
 
@@ -407,6 +549,9 @@ Skipped BCL static call at StaticClock.Now IL_0000: System.DateTime::get_Now()
 
 ## 10. Known Constraints
 
+- high-level facade `Shims.Create<TConcrete>()` は型 identity 問題で安全に返せないため例外を投げる
+  → `CreateObject(typeFullName)` + `Invoke(...)` を使う（`Create<T>()` が成功するのは共有 contract
+  `IShimCreatable` を指定した場合のみ）
 - BCL static method (`DateTime.Now` 等) は差し替え不可
 - expression-based static API (`Shim.Static(() => Clock.Now())`) は未実装
 - generic static method はスキップされる

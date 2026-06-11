@@ -186,6 +186,24 @@ public class MyServiceTests
 
 ## 4. Interface Mock
 
+**対象となるコード:** interface（抽象）に依存するコード。実装を差し替えてテストしたい依存を interface として受け取っている場合に使います。
+
+```csharp
+// 対象（SUT が依存する interface）
+public interface IUserService
+{
+    string GetName(int id);
+}
+
+// テスト対象（interface を DI で受け取る）
+public class Greeter
+{
+    private readonly IUserService _service;
+    public Greeter(IUserService service) => _service = service;
+    public string Greet(int id) => "Hello, " + _service.GetName(id);
+}
+```
+
 ```csharp
 var service = Mock.Of<IUserService>();
 
@@ -203,6 +221,21 @@ interface mock は `DispatchProxy` ベースなので `T` は interface であ�
 
 ## 5. Interface Spy
 
+**対象となるコード:** interface の **実装がすでに存在し**、その一部の呼び出しだけ差し替えたい場合。スタブしていない呼び出しは実インスタンスに委譲されます。
+
+```csharp
+// 対象: interface とその実装
+public interface IUserService
+{
+    string GetName(int id);
+}
+
+public class RealUserService : IUserService
+{
+    public string GetName(int id) => "real-" + id;
+}
+```
+
 ```csharp
 var realService = new RealUserService();
 var spy = Spy.Of<IUserService>(realService);
@@ -219,6 +252,19 @@ Assert.AreEqual("real-7", spy.GetName(7));    // stub なし → real 実装に�
 ---
 
 ## 6. Class Proxy
+
+**対象となるコード:** interface を持たない **具象クラス**で、差し替えたいメソッドが `public virtual` の場合。virtual メソッドのみインターセプトできます。
+
+```csharp
+// 対象: public non-sealed クラス + public virtual メソッド
+public class UserRepository
+{
+    public virtual string FindName(int id) => /* 実 DB アクセスなど */ "db-" + id;
+}
+```
+
+> non-virtual / static / private / sealed メソッドは差し替えできません。`new UserRepository()` のような
+> 直接 `new` の差し替えが必要な場合はセクション 16（Experimental Shims）を参照してください。
 
 ```csharp
 var repository = Mock.Class<UserRepository>();
@@ -240,6 +286,16 @@ class proxy の制約:
 ---
 
 ## 7. Class Spy / Partial Mock
+
+**対象となるコード:** 具象クラスで、**一部の virtual メソッドだけ差し替え、残りは実装（base）をそのまま使いたい**場合。
+
+```csharp
+// 対象: 既定の実装を持つ public virtual メソッド
+public class TaxCalculator
+{
+    public virtual decimal GetRate(string region) => 0.10m;  // 既定 10%
+}
+```
 
 ```csharp
 var calculator = Spy.Class<TaxCalculator>();
@@ -408,6 +464,37 @@ Hint:
 Mono.Cecil で IL をビルド後にリライトし、isolated AssemblyLoadContext (ALC) で動かします。  
 元のアセンブリは**絶対に上書きしません**。
 
+**対象となるコード:** interface も virtual も使わず、メソッド本体の中で **依存を直接 `new` している** コード、
+または **user-defined な static メソッドを直接呼んでいる** コード。proxy ベース（セクション 4〜7）では
+差し替えられないこれらのパターンが対象です。
+
+```csharp
+// 対象 (1): メソッド内で依存を直接 new しているコード
+public class UserService
+{
+    public string GetDisplayName(int id)
+    {
+        var repository = new UserRepository();   // ← この new を差し替えたい
+        return repository.GetName(id);
+    }
+}
+
+// 対象 (2): user-defined static メソッドを直接呼んでいるコード
+public static class StaticClock
+{
+    public static string GetName(int id) => "real-name-" + id;
+}
+
+public class TimedService
+{
+    public string GetDisplayName(int id) => StaticClock.GetName(id);  // ← この static 呼び出しを差し替えたい
+}
+```
+
+> **対象外:** BCL / .NET runtime の型（`new List<T>()` や `DateTime.Now`、`File.ReadAllText` 等）、
+> generic / sealed / private、production アセンブリの in-place rewrite は差し替えできません。
+> 差し替え対象は test / sample プロジェクト内の **user-defined な public・non-generic 型**に限ります。
+
 ### 必須設定
 
 ```csharp
@@ -415,14 +502,70 @@ Mono.Cecil で IL をビルド後にリライトし、isolated AssemblyLoadConte
 [assembly: DoNotParallelize]
 ```
 
-### new SomeClass() の差し替え
+### 高レベル API（`Shims` facade・Phase 17・推奨）
+
+`Shims.For<TAnchor>()` を使うと、`NewInterceptionHarness` / `ShimContext` / `RegisterShim` /
+reflection Invoke を直接意識せずに `new` / user-defined static method を差し替えられます。
+
+```csharp
+using MiniMockito.Shims.Experimental;
+using static MiniMockito.Shims.Experimental.ShimArg;
+
+[TestClass]
+[DoNotParallelize]
+public class RepositoryShimTests
+{
+    [TestMethod]
+    public void New_UserRepository_IsShimmed()
+    {
+        // TAnchor = 差し替え対象 call site を含むアセンブリを決める型（通常はサービス型）
+        using var shims = Shims.For<UserService>()
+                               .WithNew<UserRepository>();
+
+        var fakeRepo = shims.CreateFake<UserRepository>("fake");
+
+        shims.New<UserRepository>()
+             .WithArguments(Eq("prod"))   // 省略すると catch-all
+             .Returns(fakeRepo);
+
+        // 型 identity 問題を避けるため CreateObject + Invoke を使う（推奨）
+        var service = shims.CreateObject(typeof(UserService).FullName);
+        var result = shims.Invoke<string>(service, "GetDisplayName", 1);
+    }
+}
+```
+
+user-defined static method、new + static 共存も同じ session で書けます。
+
+```csharp
+using (var shims = Shims.For<TimedService>().WithStatic(typeof(StaticClock)))
+{
+    shims.Static<string>(typeof(StaticClock), "GetName", typeof(int))
+         .WithArguments(Eq(1))
+         .Returns("fake-clock");
+
+    var service = shims.CreateObject(typeof(TimedService).FullName);
+    var result = shims.Invoke<string>(service, "GetDisplayName", 1);   // → "fake-clock"
+}
+```
+
+> **Create() の扱い:** rewrite 済みの型は isolated load context にロードされるため、
+> `Create<UserService>()` のような concrete 型は安全にキャストできず `InvalidOperationException`
+> を投げます（`CreateObject` + `Invoke` を案内）。`Create<T>()` が strongly-typed で成功するのは、
+> load context をまたいで identity を共有する contract `IShimCreatable` を実装したクラスを
+> `Create<IShimCreatable>()` で生成した場合だけです。詳細は
+> [`docs/shims-experimental-quickstart.md`](docs/shims-experimental-quickstart.md) を参照してください。
+
+### 低レベル API（new SomeClass() の差し替え）
+
+`Shims` facade が内部で使う低レベル API です。細かい制御が必要なときに使います。
 
 ```csharp
 using MiniMockito.Shims.Experimental;
 
 [TestClass]
 [DoNotParallelize]
-public class RepositoryShimTests
+public class RepositoryShimLowLevelTests
 {
     [TestMethod]
     public void New_UserRepository_IsShimmed()

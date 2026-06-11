@@ -7,4 +7,8 @@
     <LangVersion>latest</LangVersion>
   </PropertyGroup>
 
+  <ItemGroup>
+    <ProjectReference Include="..\..\src\MiniMockito.Shims.Experimental\MiniMockito.Shims.Experimental.csproj" />
+  </ItemGroup>
+
 </Project>

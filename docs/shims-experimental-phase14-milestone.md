@@ -175,6 +175,56 @@ ALC 越しの static method shim を完成させる。
 
 ---
 
+## Phase 16 — .NET Framework 4.8 / C# 7.3 テストプロジェクト
+
+**目標:** Phase 15 設計に基づき net48 / LangVersion=7.3 のテストプロジェクトを新規作成し、
+net48 環境での newobj / static shim 動作を確認する。
+
+**到達点:**
+- `tests/MiniMockito.Shims.Experimental.Net48Tests/`（net48, LangVersion 7.3）
+- net48 専用サンプル（`Net48UserRepository` / `Net48UserService` / `Net48StaticClock` / `Net48TimedService`）
+- newobj / constructor args / captor / static shim を C# 7.3（using statement）で検証
+
+---
+
+## Phase 17 — high-level scenario facade (`Shims`)
+
+**目標:** 既存の `NewInterceptionHarness` / `ShimContext` / `RegisterShim` / reflection Invoke を
+利用者が直接意識しなくても `new` / user-defined static method 差し替えを書ける facade を追加する。
+新しい interception 機能は追加しない（既存 low-level API はそのまま維持）。
+
+**到達点:**
+- `Shims` facade（`IDisposable`）— harness + rewrite + ALC + `ShimContext` を 1 つの session に集約
+- `Shims.For<TAnchor>()` — anchor 型の所属アセンブリを rewrite 対象にする
+- `WithNew<TTarget>()` / `WithStatic(Type)` — rewrite target を登録（確定後の追加は例外）
+- `New<TTarget>()` — 既存 `RegisterShim` / `RegisterShimWithMatchers` に委譲（`WithArguments` / `ShimCaptor` 対応）
+- `Static<TResult>(...)` / `Static(...)` — 既存 `Shim.Static` builder に委譲（非 void / void）
+- `CreateFake<TTarget>(...)` — rewrite 済み identity の fake を生成
+- `Create<T>()` — **共有 contract（`IShimCreatable`）のときだけ strongly-typed で成功**。
+  concrete 型は型 identity 問題で安全に返せないため `InvalidOperationException`（`CreateObject` / `Invoke` を案内）
+- `CreateObject(typeFullName)` + `Invoke<TResult>(...)` / `Invoke(...)` — 推奨 fallback
+- diagnostics 転送（`LastNewDispatchDiagnostics` / `LastStaticDispatchDiagnostics` / `GetAlcDiagnostics()`）
+- rewrite は初回利用時に lazy 確定。`Dispose` で `ShimContext` → harness を cleanup
+- `IShimCreatable` — load context をまたいで identity を共有する contract（本アセンブリ内 interface）
+- net8 テスト 15 件（`Phase17HighLevelApiTests`）、net48 テスト 11 件（`Net48HighLevelApiTests`）追加
+- **既存 low-level / v1 / v2 テストは無変更で全て PASS**
+
+| 検証項目 | net8 | net48 |
+|---------|------|-------|
+| parameterless new shim | ✅ | ✅ |
+| constructor args new shim | ✅ | ✅ |
+| `WithArguments(Eq(...))` | ✅ | ✅ |
+| `ShimCaptor` | ✅ | ✅ |
+| user-defined static method shim | ✅ | ✅ |
+| void static method shim | ✅ | ✅ |
+| new + static 共存 | ✅ | ✅ |
+| `Create<IShimCreatable>()` 成功 | ✅ | ✅ |
+| 型 identity 例外メッセージ | ✅ | ✅ |
+| `CreateObject` / `Invoke` fallback | ✅ | ✅ |
+| 確定後 `WithNew` / `WithStatic` 例外 | ✅ | ✅ |
+
+---
+
 ## 対応済み機能
 
 | 機能 | Phase |
@@ -198,6 +248,11 @@ ALC 越しの static method shim を完成させる。
 | BCL skip diagnostics | 14 |
 | static + new shim 共存 | 14 |
 | Docs / Samples / Cleanup | 14.5 |
+| net48 / C# 7.3 互換設計 | 15 |
+| net48 テストプロジェクト | 16 |
+| high-level facade (`Shims`) | 17 |
+| `Create` / `CreateObject` / `Invoke` | 17 |
+| `IShimCreatable` 共有 contract | 17 |
 
 ---
 
