@@ -8,10 +8,10 @@
     <RootNamespace>MiniMockito</RootNamespace>
     <PackageId>MiniMockito.Net</PackageId>
     <Title>MiniMockito.Net</Title>
-    <Version>0.2.0-preview.5</Version>
+    <Version>0.2.0-preview.6</Version>
     <Authors>MiniMockito.Net contributors</Authors>
     <Company>MiniMockito.Net contributors</Company>
-    <Description>A lightweight mocking framework for .NET and MSTest with interface mocks, spies, verification, and v2 class proxy support for public virtual methods.</Description>
+    <Description>A lightweight mocking framework for .NET and MSTest with interface mocks, spies, verification, and v2 class proxy support for public virtual methods. Interface mocks work on .NET Framework 4.8 including PlatformTarget=x86 via a RealProxy backend (DispatchProxy on net8.0).</Description>
     <PackageTags>mocking;testing;mstest;dispatchproxy;class-proxy;mockito</PackageTags>
     <PackageLicenseExpression>MIT</PackageLicenseExpression>
     <PackageReadmeFile>README.md</PackageReadmeFile>

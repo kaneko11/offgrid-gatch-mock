@@ -8,9 +8,9 @@
     <RootNamespace>MiniMockito.Shims.Experimental</RootNamespace>
     <PackageId>MiniMockito.Shims.Experimental</PackageId>
     <Title>MiniMockito.Shims.Experimental</Title>
-    <Version>0.1.0-alpha.3</Version>
+    <Version>0.1.0-alpha.4</Version>
     <Authors>MiniMockito.Net contributors</Authors>
-    <Description>Experimental shim infrastructure for MiniMockito.Net (Phase 14.5 milestone). Provides build-time IL rewrite for newobj interception and user-defined static method mocking via an isolated AssemblyLoadContext. NOT stable — API may change in future phases. BCL static methods, generic methods, and expression-based shim APIs are not supported. Parallel test execution requires [assembly: DoNotParallelize].</Description>
+    <Description>Experimental shim infrastructure for MiniMockito.Net (Phase 17). Provides build-time IL rewrite for newobj interception and user-defined static method mocking via an isolated AssemblyLoadContext, plus a high-level Shims.For&lt;T&gt;() facade (WithNew/WithStatic/New/Static/Create/CreateObject/Invoke). NOT stable — API may change in future phases. BCL static methods, generic methods, and expression-based shim APIs are not supported. Parallel test execution requires [assembly: DoNotParallelize].</Description>
     <PackageTags>mocking;testing;mstest;shims;experimental</PackageTags>
     <PackageLicenseExpression>MIT</PackageLicenseExpression>
     <PackageReadmeFile>README.md</PackageReadmeFile>
