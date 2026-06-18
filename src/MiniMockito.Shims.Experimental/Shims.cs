@@ -1,5 +1,6 @@
 using System;
 using System.Collections.Generic;
+using System.IO;
 using System.Linq;
 using System.Reflection;
 
@@ -44,18 +45,19 @@ namespace MiniMockito.Shims.Experimental;
 /// </summary>
 public sealed class Shims : IDisposable
 {
-    private readonly Type _anchorType;
+    private readonly string _targetAssemblyPath;
     private readonly NewInterceptionHarness _harness;
     private readonly List<Type> _newTargets = new List<Type>();
     private readonly List<Type> _staticTargets = new List<Type>();
+    private readonly List<Action<Shims>> _pendingReplacements = new List<Action<Shims>>();
 
     private ShimContext? _context;
     private bool _finalized;
     private bool _disposed;
 
-    private Shims(Type anchorType)
+    private Shims(string targetAssemblyPath)
     {
-        _anchorType = anchorType;
+        _targetAssemblyPath = targetAssemblyPath;
         _harness = NewInterceptionHarness.Create();
     }
 
@@ -66,7 +68,21 @@ public sealed class Shims : IDisposable
     /// </summary>
     /// <typeparam name="TAnchor">A concrete, public type in the assembly to rewrite.</typeparam>
     public static Shims For<TAnchor>() where TAnchor : class
-        => new Shims(typeof(TAnchor));
+        => new Shims(typeof(TAnchor).Assembly.Location);
+
+    /// <summary>
+    /// Starts a new shim session that rewrites the assembly at <paramref name="targetAssemblyPath"/>
+    /// (Phase 23).  Use this with <see cref="ReplaceNew{T}(T)"/> / <see cref="ReplaceNew(Type, object)"/> /
+    /// <see cref="ReplaceNew(string, string, object)"/> to intercept <c>new</c> calls without needing a
+    /// compile-time anchor type.
+    /// </summary>
+    /// <param name="targetAssemblyPath">Path to the assembly whose <c>newobj</c> call sites are rewritten.</param>
+    public static Shims ForAssembly(string targetAssemblyPath)
+    {
+        if (string.IsNullOrWhiteSpace(targetAssemblyPath))
+            throw new ArgumentException("Target assembly path must be provided.", nameof(targetAssemblyPath));
+        return new Shims(targetAssemblyPath);
+    }
 
     /// <summary>
     /// Registers <typeparamref name="TTarget"/> as a <c>newobj</c> interception target.
@@ -99,6 +115,118 @@ public sealed class Shims : IDisposable
         _harness.WithStaticTarget(declaringType);
         _staticTargets.Add(declaringType);
         return this;
+    }
+
+    /// <summary>
+    /// Easy API (Phase 23): replaces <c>new T()</c> with <paramref name="fake"/>.  Internal targets
+    /// (defined in the rewrite-target assembly) are registered with <c>WithTarget</c>; external
+    /// (cross-assembly) targets with <c>WithExternalTarget</c>.  The fake is registered when the
+    /// rewrite is finalized (first <see cref="CreateObject"/> / <see cref="Create{T}"/> /
+    /// <see cref="Invoke{TResult}(object, string, object[])"/>).
+    ///
+    /// <para><b>Internal targets:</b> the fake must share the rewritten load-context identity, which a
+    /// hand-made instance does not have.  For internal targets use the factory overload
+    /// <see cref="ReplaceNew{T}(Func{Shims, object})"/> with <see cref="CreateFake{TTarget}"/>.</para>
+    /// </summary>
+    public Shims ReplaceNew<T>(T fake) where T : class
+    {
+        ThrowIfDisposed();
+        ThrowIfFinalizedForReplaceNew();
+        if (fake == null) throw new ArgumentNullException(nameof(fake));
+
+        var type = typeof(T);
+        DeclareNewTarget(type);
+        _pendingReplacements.Add(s => s._harness.RegisterShim(type, fake));
+        return this;
+    }
+
+    /// <summary>
+    /// Easy API (Phase 23): replaces <c>new T()</c> with a fake produced by <paramref name="fakeFactory"/>
+    /// at rewrite-finalization time.  Use this for <b>internal</b> targets where the fake must be created
+    /// from the rewritten load context, e.g.
+    /// <c>ReplaceNew&lt;UserRepository&gt;(s =&gt; s.CreateFake&lt;UserRepository&gt;("fake"))</c>.
+    /// </summary>
+    public Shims ReplaceNew<T>(Func<Shims, object> fakeFactory) where T : class
+    {
+        ThrowIfDisposed();
+        ThrowIfFinalizedForReplaceNew();
+        if (fakeFactory == null) throw new ArgumentNullException(nameof(fakeFactory));
+
+        var type = typeof(T);
+        DeclareNewTarget(type);
+        _pendingReplacements.Add(s =>
+        {
+            var fake = fakeFactory(s);
+            if (fake == null)
+                throw new InvalidOperationException(
+                    "ReplaceNew<" + (type.FullName ?? type.Name) + ">(factory): the factory returned null.");
+            s._harness.RegisterShim(type, fake);
+        });
+        return this;
+    }
+
+    /// <summary>
+    /// Easy API (Phase 23): replaces <c>new</c> of <paramref name="targetType"/> with
+    /// <paramref name="fake"/>.  Internal vs external is detected from the type's assembly.
+    /// </summary>
+    public Shims ReplaceNew(Type targetType, object fake)
+    {
+        ThrowIfDisposed();
+        ThrowIfFinalizedForReplaceNew();
+        if (targetType == null) throw new ArgumentNullException(nameof(targetType));
+        if (fake == null) throw new ArgumentNullException(nameof(fake));
+
+        DeclareNewTarget(targetType);
+        _pendingReplacements.Add(s => s._harness.RegisterShim(targetType, fake));
+        return this;
+    }
+
+    /// <summary>
+    /// Easy API (Phase 23): replaces <c>new</c> of the external type identified by
+    /// <paramref name="externalAssemblyPath"/> + <paramref name="typeFullName"/> with
+    /// <paramref name="fake"/>, without requiring a compile-time reference to the external type.
+    /// </summary>
+    /// <exception cref="ShimExternalTargetException">The external type could not be resolved.</exception>
+    public Shims ReplaceNew(string externalAssemblyPath, string typeFullName, object fake)
+    {
+        ThrowIfDisposed();
+        ThrowIfFinalizedForReplaceNew();
+        if (string.IsNullOrWhiteSpace(externalAssemblyPath))
+            throw new ArgumentException("External assembly path must be provided.", nameof(externalAssemblyPath));
+        if (string.IsNullOrWhiteSpace(typeFullName))
+            throw new ArgumentException("Type full name must be provided.", nameof(typeFullName));
+        if (fake == null) throw new ArgumentNullException(nameof(fake));
+
+        _harness.WithExternalTarget(externalAssemblyPath, typeFullName);
+        _pendingReplacements.Add(s => s._harness.RegisterShim(typeFullName, fake));
+        return this;
+    }
+
+    private void DeclareNewTarget(Type type)
+    {
+        if (IsInternalTarget(type))
+            _harness.WithTarget(type);
+        else
+            _harness.WithExternalTarget(type);
+    }
+
+    private bool IsInternalTarget(Type type)
+    {
+        var location = type.Assembly.Location;
+        if (string.IsNullOrEmpty(location) || string.IsNullOrEmpty(_targetAssemblyPath))
+            return false;
+
+        try
+        {
+            return string.Equals(
+                Path.GetFullPath(location),
+                Path.GetFullPath(_targetAssemblyPath),
+                StringComparison.OrdinalIgnoreCase);
+        }
+        catch (Exception ex) when (ex is ArgumentException or NotSupportedException or PathTooLongException)
+        {
+            return false;
+        }
     }
 
     /// <summary>
@@ -236,16 +364,7 @@ public sealed class Shims : IDisposable
             throw new ArgumentException("Type full name must be provided.", nameof(typeFullName));
         EnsureFinalized();
 
-        var assembly = GetRewrittenAssembly();
-        var type = assembly.GetType(typeFullName, throwOnError: true)!;
-        var instance = Activator.CreateInstance(type);
-        if (instance == null)
-        {
-            throw new InvalidOperationException(
-                "Activator.CreateInstance returned null for " + typeFullName + ".");
-        }
-
-        return instance;
+        return _harness.CreateObject(typeFullName);
     }
 
     /// <summary>
@@ -291,10 +410,22 @@ public sealed class Shims : IDisposable
     }
 
     /// <summary>
+    /// Gets the harness-level diagnostics log (Phase 21/23): external target resolution, registration,
+    /// the target assembly being rewritten, registry keys, duplicate FullName risk, etc.  Forwarded
+    /// from the underlying <see cref="NewInterceptionHarness.Diagnostics"/>.
+    /// </summary>
+    public IReadOnlyList<string> Diagnostics => _harness.Diagnostics;
+
+    /// <summary>
     /// Gets the diagnostics captured by the most recent <c>newobj</c> dispatch in this session,
     /// or <see langword="null"/> if no dispatch has occurred.
     /// </summary>
     public ShimDispatchDiagnostics? LastNewDispatchDiagnostics => _context?.LastDispatchDiagnostics;
+
+    /// <summary>
+    /// Alias of <see cref="LastNewDispatchDiagnostics"/> (Phase 23 diagnostics forwarding).
+    /// </summary>
+    public ShimDispatchDiagnostics? LastDispatchDiagnostics => _context?.LastDispatchDiagnostics;
 
     /// <summary>
     /// Gets the diagnostics captured by the most recent static-method dispatch in this session,
@@ -332,13 +463,23 @@ public sealed class Shims : IDisposable
         if (_finalized)
             return;
 
-        _harness.RewriteAssembly(_anchorType.Assembly.Location);
+        _harness.RewriteAssembly(_targetAssemblyPath);
         _context = ShimContext.Create();
         _finalized = true;
+
+        // Apply all deferred ReplaceNew(...) registrations now that the rewrite + context exist.
+        // _finalized is already true so any CreateFake(...) inside a factory will not re-enter here.
+        foreach (var registration in _pendingReplacements)
+            registration(this);
+        _pendingReplacements.Clear();
     }
 
     private Assembly GetRewrittenAssembly()
-        => _harness.GetRewrittenType(_anchorType).Assembly;
+    {
+        EnsureFinalized();
+        return _harness.LoadedAssembly
+            ?? throw new InvalidOperationException("The rewritten assembly has not been loaded.");
+    }
 
     private Type ResolveSingleImplementation(Type contract)
     {
@@ -415,6 +556,21 @@ public sealed class Shims : IDisposable
                 "Reason: the target assembly is rewritten and loaded on the first New/Static/Create/",
                 "        CreateObject/Invoke/CreateFake call; targets are locked in at that point.",
                 "Hint: declare all WithNew<T>() / WithStatic(...) targets before using the session."));
+        }
+    }
+
+    private void ThrowIfFinalizedForReplaceNew()
+    {
+        if (_finalized)
+        {
+            throw new InvalidOperationException(string.Join(
+                Environment.NewLine,
+                "ReplaceNew(...) failed: rewrite already completed.",
+                "target cannot be added after rewrite.",
+                "Reason: the target assembly is rewritten and loaded on the first",
+                "        CreateObject/Create/Invoke call; new targets are locked in at that point.",
+                "Hint: create a new Shims session (Shims.ForAssembly(...) or Shims.For<T>()) and declare",
+                "      every ReplaceNew(...) before the first CreateObject/Create/Invoke."));
         }
     }
 

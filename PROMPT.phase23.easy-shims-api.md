@@ -79,6 +79,33 @@ using (var shims = Shims.ForAssembly(targetAssemblyPath)
 }
 ```
 
+### 1つのテストで複数の new を差し替える場合
+
+1つの `ShimsSession` 内で `ReplaceNew(...)` を複数回呼べるようにしてください。
+
+```csharp
+using (var shims = Shims.ForAssembly(targetAssemblyPath)
+                        .ReplaceNew(
+                            externalAssemblyPath,
+                            "ExternalLib.ExternalDbContext",
+                            fakeDb)
+                        .ReplaceNew(
+                            externalAssemblyPath,
+                            "ExternalLib.ExternalLogger",
+                            fakeLogger)
+                        .ReplaceNew<UserRepository>(fakeRepository))
+{
+    var service = shims.CreateObject("TargetApp.UserService");
+
+    var result = shims.Invoke<string>(
+        service,
+        "Run",
+        1);
+
+    Assert.AreEqual("fake-result", result);
+}
+```
+
 ### internal target の new 差し替えも同じ書き方に寄せる
 
 ```csharp
@@ -103,6 +130,7 @@ using (var shims = Shims.For<UserService>()
 - `ReplaceNew(Type targetType, object fake)`
 - `ReplaceNew(string externalAssemblyPath, string typeFullName, object fake)`
 - 安全に実装できるなら `ReplaceNew(string typeFullName, object fake)`
+- 条件付き replacement 用の builder API が既にある場合は `ReplaceNew<T>()` からも利用可能にする
 - `CreateObject(string typeFullName)`
 - `Create<T>()`
 - `Invoke<TResult>(object instance, string methodName, params object[] args)`
@@ -143,6 +171,54 @@ internal / external の判定が困難な場合は、まず `WithExternalTarget<
 - `WithExternalTarget(externalAssemblyPath, typeFullName)` 相当
 - `RegisterShim(typeFullName, fake)` 相当
 - 型解決失敗時は `ShimExternalTargetException` などの既存例外を活用
+
+### 複数 replacement の仕様
+
+1つの `ShimsSession` 内で `ReplaceNew(...)` を複数回呼べるようにしてください。
+
+要件:
+
+- rewrite 確定前であれば `ReplaceNew(...)` は何度でも追加可能にする
+- external target と internal target を同じ session 内で混在できるようにする
+- 複数の external assembly / typeFullName を同じ session 内で登録できるようにする
+- 初回 `CreateObject(...)` / `Create<T>()` / `Invoke<TResult>(...)` 時に、登録済みの replacement をまとめて rewrite 対象に反映する
+- rewrite 確定後に `ReplaceNew(...)` を追加しようとした場合は、分かりやすい例外を出す
+- 同じ target type に複数回 `ReplaceNew(type, fake)` した場合は、既存 `ShimRuleRegistry` の仕様に合わせて last stub wins とする
+- 同じ target type に対して引数条件を分けたい場合は、`ReplaceNew<T>().WithArguments(...).Returns(...)` が実装可能なら対応する
+- 条件付き builder API が Phase 23 で重すぎる場合は、既存 `New<T>().WithArguments(...).Returns(...)` を使う方針を docs に明記する
+
+想定例:
+
+```csharp
+using (var shims = Shims.ForAssembly(targetAssemblyPath)
+                        .ReplaceNew(
+                            externalAssemblyPath,
+                            "ExternalLib.ExternalDbContext",
+                            fakeDb)
+                        .ReplaceNew(
+                            externalAssemblyPath,
+                            "ExternalLib.ExternalLogger",
+                            fakeLogger)
+                        .ReplaceNew<UserRepository>(fakeRepository))
+{
+    var service = shims.CreateObject("TargetApp.UserService");
+    var result = shims.Invoke<string>(service, "Run", 1);
+}
+```
+
+同じ型で last stub wins の想定:
+
+```csharp
+using (var shims = Shims.ForAssembly(targetAssemblyPath)
+                        .ReplaceNew<ExternalDbContext>(firstFake)
+                        .ReplaceNew<ExternalDbContext>(lastFake))
+{
+    var service = shims.CreateObject("TargetApp.UserService");
+    var result = shims.Invoke<string>(service, "GetDisplayName", 1);
+
+    // lastFake が使われる
+}
+```
 
 ### rewrite 確定タイミング
 
@@ -213,17 +289,21 @@ net48 tests と docs の sample では以下を守ってください。
 1. `ReplaceNew<T>(fake)` で external newobj が差し替わる
 2. `ReplaceNew(Type, fake)` で external newobj が差し替わる
 3. `ReplaceNew(string assemblyPath, string typeFullName, fake)` で external newobj が差し替わる
-4. `CreateObject + Invoke` で実行できる
-5. no match fallback が壊れていない
-6. internal target の newobj rewrite が壊れていない
-7. internal target に対して `ReplaceNew<T>(fake)` が使える
-8. net48 / C# 7.3 でも同じ Easy API が使える
-9. rewrite 確定後に `ReplaceNew` を追加すると分かりやすい例外になる
-10. diagnostics が取得できる
-11. `ShimContext` を利用者が直接作らなくても動く
-12. `Dispose` 後に cleanup される
-13. 既存 low-level API の tests が壊れていない
-14. 既存 MiniMockito 本体 tests が壊れていない
+4. 1つの `ShimsSession` で external target を2つ `ReplaceNew` できる
+5. 1つの `ShimsSession` で internal target と external target を混在して `ReplaceNew` できる
+6. 同じ target type に2回 `ReplaceNew` した場合 last stub wins になる
+7. rewrite 確定前は複数 `ReplaceNew` できる
+8. rewrite 確定後は `ReplaceNew` 追加で分かりやすい例外になる
+9. `CreateObject + Invoke` で実行できる
+10. no match fallback が壊れていない
+11. internal target の newobj rewrite が壊れていない
+12. internal target に対して `ReplaceNew<T>(fake)` が使える
+13. net48 / C# 7.3 でも同じ Easy API が使える
+14. diagnostics が取得できる
+15. `ShimContext` を利用者が直接作らなくても動く
+16. `Dispose` 後に cleanup される
+17. 既存 low-level API の tests が壊れていない
+18. 既存 MiniMockito 本体 tests が壊れていない
 
 ## docs
 
@@ -239,6 +319,9 @@ docs の方針:
 - Easy API を最初に紹介する
 - low-level `NewInterceptionHarness` API は advanced section に移す
 - cross-assembly new interception の推奨書き方を `ReplaceNew(...)` にする
+- 1つのテストで複数 `ReplaceNew(...)` を登録する例を追加する
+- same target type に複数回 `ReplaceNew` した場合は last stub wins であることを明記する
+- 引数条件で fake を分けたい場合の推奨方法を明記する
 - net48 sample は `using` statement 形式にする
 - BCL static method は未対応と明記する
 - DbContext 系では手動 fake を `ReplaceNew` / `RegisterShim` に渡す方針を明記する
@@ -285,6 +368,8 @@ dotnet test tests/MiniMockito.Shims.Experimental.Net48Tests/MiniMockito.Shims.Ex
 
 - 追加した Easy API
 - `ReplaceNew(...)` の内部動作
+- 複数 replacement の対応内容
+- same target type の last stub wins の扱い
 - rewrite 確定タイミング
 - `ShimContext` 管理方式
 - diagnostics forwarding の内容

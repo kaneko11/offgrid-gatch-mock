@@ -526,3 +526,68 @@ Phase 20 の cross-assembly new interception を発展させ、テストプロ�
 - `DbContext` 系は実生成に依存しない手動 fake を推奨。
 - BCL static method は引き続き未対応。external assembly 自体は rewrite しない。
 - `[assembly: DoNotParallelize]` 必須。
+
+---
+
+## Phase 23 — Easy Shims API / ReplaceNew facade（追記）
+
+### 目標
+
+新しい interception 機能は追加せず、Phase 20 / 21 の cross-assembly new interception を
+`NewInterceptionHarness` / `ShimContext` / `WithExternalTarget` / `RegisterShim` を直接書かずに使える
+high-level facade（Easy API）を追加する。
+
+### 追加 Easy API
+
+| API | 内容 |
+|-----|------|
+| `Shims.ForAssembly(string targetAssemblyPath)` | target assembly を rewrite 対象に持つ session を作成 |
+| `ReplaceNew<T>(T fake)` | internal/external を自動判定し target 宣言 + fake 登録を予約 |
+| `ReplaceNew<T>(Func<Shims, object> fakeFactory)` | finalize 時に fake を生成（internal の ALC fake 用） |
+| `ReplaceNew(Type targetType, object fake)` | Type 指定版 |
+| `ReplaceNew(string externalAssemblyPath, string typeFullName, object fake)` | 文字列指定の external 版 |
+| `Shims.CreateObject` / `Create<T>` / `Invoke<TResult>` | 既存 facade メソッド（finalize トリガ） |
+| `Shims.Diagnostics` / `LastDispatchDiagnostics` / `GetAlcDiagnostics()` | diagnostics forwarding |
+
+補助として `NewInterceptionHarness.WithTarget(Type)` と internal な `LoadedAssembly` を追加。
+
+### `ReplaceNew(...)` の内部動作
+
+- target type が rewrite 対象 assembly 内なら `WithTarget` 相当、外部アセンブリ型なら
+  `WithExternalTarget` 相当を **即時**に呼び、fake 登録（`RegisterShim` 相当）は **finalize まで遅延**する。
+- internal / external 判定は `type.Assembly.Location` と target assembly path の比較。
+- 文字列版は `WithExternalTarget(assemblyPath, typeFullName)` で解決し、`RegisterShim(typeFullName, fake)` を遅延。
+
+### 複数 replacement / last stub wins
+
+- 1 session 内で `ReplaceNew(...)` を何度でも登録でき、internal と external を混在できる。
+- finalize 時に登録順で遅延登録を実行するため、同じ target type への複数 `ReplaceNew` は
+  既存 `ShimRuleRegistry` の **last stub wins** に従う。
+
+### rewrite 確定タイミング / ShimContext 管理
+
+- rewrite は初回 `CreateObject` / `Create<T>` / `Invoke<TResult>` で確定（finalize）。
+  finalize 時に `ShimContext` を生成し、遅延登録を反映する。
+- 確定後の `ReplaceNew(...)` は `InvalidOperationException`
+  （`rewrite already completed` / `target cannot be added after rewrite` / `create a new Shims session`）。
+- `Dispose()`（`using` 終了）で `ShimContext` と `NewInterceptionHarness`（loader / ALC / temp）を cleanup。
+  利用者は `ShimContext.Create()` を書かない。
+
+### internal target の扱い
+
+- internal の fake は rewrite 済み ALC の型 identity を要するため、手作りインスタンスは不可。
+  `ReplaceNew<T>(s => s.CreateFake<T>(...))` の factory 形式で ALC fake を生成して登録する。
+- 引数条件で fake を分けたい場合は低レベルの `New<T>().WithArguments(...).Returns(...)` を使う。
+
+### 追加テスト
+
+- `tests/MiniMockito.Shims.Experimental.Tests/EasyShimsApiTests.cs`（net8, 11 件）
+- `tests/MiniMockito.Shims.Experimental.Net48Tests/Net48EasyShimsApiTests.cs`（net48, 7 件）
+- テスト用アセット `ExternalLib` に `ExternalLogger`、`CrossAssemblySample` に internal `InternalGreeter` と
+  internal+external を混在構築する `Run(int)` を追加。
+
+### 非対象（Phase 23 で実装しない）
+
+- BCL static method / `DateTime.Now` / `File.ReadAllText` の mocking
+- external assembly 自体の rewrite、production in-place rewrite、runtime IL rewrite、CLR Profiling、detour
+- expression-based API、public API の破壊的変更

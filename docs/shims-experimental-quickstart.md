@@ -37,6 +37,7 @@
 | cross-assembly `new ExternalType()` の差し替え（外部アセンブリ型の newobj） | ✅ 対応 (Phase 20) |
 | 外部型を assembly path + type full name の文字列で指定（コンパイル時参照不要） | ✅ 対応 (Phase 21) |
 | cross-assembly diagnostics（解決/登録/rewrite/skip/registry key/duplicate risk） | ✅ 対応 (Phase 21) |
+| Easy API `Shims.ForAssembly(...).ReplaceNew(...)`（複数登録 / internal・external 混在 / last stub wins） | ✅ 対応 (Phase 23) |
 | ShimContext.Dispose() で確実に cleanup | ✅ 対応 |
 
 ---
@@ -133,7 +134,72 @@ experimental package は本体 release の安定性に影響しません。
 
 ---
 
-## 6. 使い方（high-level facade）— Phase 17
+## 6. Easy Shims API — `ReplaceNew`（Phase 23・最推奨）
+
+cross-assembly の `new` 差し替えは、`Shims.ForAssembly(...)` + `ReplaceNew(...)` が最短の書き方です。
+`NewInterceptionHarness` / `ShimContext` / `WithExternalTarget` / `RegisterShim` を直接書く必要はありません。
+これらの low-level API は後述の **6b / 6c（advanced）** に移しています（Easy API が内部で利用します）。
+
+### 6.0 ReplaceNew の基本
+
+```csharp
+// 外部型を assembly path + type full name で指定（コンパイル時参照不要）
+using (var shims = Shims.ForAssembly(targetAssemblyPath)
+                        .ReplaceNew(externalAssemblyPath, "ExternalLib.ExternalDbContext", fakeContext))
+{
+    var service = shims.CreateObject("TargetApp.UserService");
+    var result = shims.Invoke<string>(service, "GetDisplayName", 1);
+    // → "fake-1"
+}
+
+// 外部型をコンパイル時参照できる場合
+using (var shims = Shims.ForAssembly(targetAssemblyPath)
+                        .ReplaceNew<ExternalDbContext>(fakeContext)) { ... }
+
+// Type で指定する場合
+using (var shims = Shims.ForAssembly(targetAssemblyPath)
+                        .ReplaceNew(typeof(ExternalDbContext), fakeContext)) { ... }
+```
+
+### 6.0a 複数 `ReplaceNew` / internal・external 混在
+
+1つの `ShimsSession`（`Shims`）内で `ReplaceNew(...)` を何度でも登録でき、internal target と
+external target を混在できます。
+
+```csharp
+using (var shims = Shims.ForAssembly(targetAssemblyPath)
+                        .ReplaceNew(externalAssemblyPath, "ExternalLib.ExternalDbContext", fakeDb)
+                        .ReplaceNew(externalAssemblyPath, "ExternalLib.ExternalLogger", fakeLogger)
+                        .ReplaceNew<InternalGreeter>(s => s.CreateFake<InternalGreeter>("g")))
+{
+    var service = shims.CreateObject("TargetApp.UserService");
+    var result = shims.Invoke<string>(service, "Run", 1);
+}
+```
+
+### 6.0b 仕様メモ
+
+- **rewrite 確定タイミング**: 初回 `CreateObject(...)` / `Create<T>()` / `Invoke<TResult>(...)` で確定。
+  登録済みの `ReplaceNew(...)` はこのタイミングでまとめて反映されます。
+- **確定後の追加**: rewrite 確定後に `ReplaceNew(...)` を追加すると `InvalidOperationException`
+  （`rewrite already completed` / `target cannot be added after rewrite` / `create a new Shims session`）。
+- **same target type に複数回 `ReplaceNew`**: **last stub wins**（既存 `ShimRuleRegistry` 準拠）。
+- **引数条件で fake を分けたい**場合: `ReplaceNew` は catch-all なので、低レベルの
+  `New<T>().WithArguments(...).Returns(...)`（セクション 6.2 / 6b）を使ってください。
+- **internal target の fake**: 手作りインスタンスは rewrite 済み ALC の型 identity を持たないため
+  差し替わりません。internal は `ReplaceNew<T>(s => s.CreateFake<T>(...))`（factory 形式）を使います。
+- **`Create<T>()`**: load context / assembly identity 上 安全に cast できる場合のみ成功。
+  失敗時は分かりやすい例外を出すので `CreateObject(...)` + `Invoke<TResult>(...)` を使ってください。
+- **DbContext 系**: コンストラクタ／`Dispose` に副作用がある型は、実生成に依存しない手動 fake を
+  `ReplaceNew(...)` に渡してください（`CreateFakeExternal` での自動生成は避ける）。
+- **BCL static method**（`DateTime.Now` / `File.ReadAllText` 等）は未対応のままです。
+- **`ShimContext` は不要**: session 内部で生成・破棄されます。`Dispose()`（= `using` 終了）で
+  `ShimContext` / `NewInterceptionHarness` / rewritten assembly loader が cleanup されます。
+- **diagnostics**: `shims.Diagnostics` / `shims.LastDispatchDiagnostics` / `shims.GetAlcDiagnostics()`。
+
+---
+
+## 6a. 使い方（high-level facade）— Phase 17
 
 `Shims` facade を使うと、`NewInterceptionHarness` / `ShimContext` / `RegisterShim` / reflection Invoke
 を直接意識せずに `new` / user-defined static method の差し替えが書けます。
