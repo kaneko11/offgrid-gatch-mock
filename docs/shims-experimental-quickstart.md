@@ -132,6 +132,18 @@ tests/
 `MiniMockito` 本体は `MiniMockito.Shims.Experimental` を参照しません。  
 experimental package は本体 release の安定性に影響しません。
 
+### インストール（現行プレビュー版）
+
+```xml
+<!-- 本体（net8.0 / net48） -->
+<PackageReference Include="MiniMockito.Net" Version="0.2.0-preview.7" />
+<!-- 実験パッケージ（test-only・API は変わり得ます） -->
+<PackageReference Include="MiniMockito.Shims.Experimental" Version="0.1.0-alpha.5" />
+```
+
+ローカル検証時は `dotnet pack -c Release -o artifacts` で nupkg を生成し、`artifacts` を NuGet ソースに
+追加して参照してください（手順は README を参照）。
+
 ---
 
 ## 6. Easy Shims API — `ReplaceNew`（Phase 23・最推奨）
