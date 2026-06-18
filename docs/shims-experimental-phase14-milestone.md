@@ -591,3 +591,48 @@ high-level facade（Easy API）を追加する。
 - BCL static method / `DateTime.Now` / `File.ReadAllText` の mocking
 - external assembly 自体の rewrite、production in-place rewrite、runtime IL rewrite、CLR Profiling、detour
 - expression-based API、public API の破壊的変更
+
+---
+
+## Phase 22 — NuGet package update / release validation（追記）
+
+### 目標
+
+新機能追加や public API の破壊的変更を行わず、NuGet パッケージを更新できる状態にする
+（Release build / Release test / `dotnet pack` / nupkg 内容確認まで。nuget.org への push はしない）。
+
+### バージョン更新
+
+| パッケージ | 旧 | 新 |
+|-----------|----|----|
+| `MiniMockito.Net` | 0.2.0-preview.6 | **0.2.0-preview.7** |
+| `MiniMockito.Shims.Experimental` | 0.1.0-alpha.4 | **0.1.0-alpha.5** |
+
+### csproj metadata
+
+- `MiniMockito.Net`: `Version` のみ更新（PackageId / Authors / Description / PackageTags /
+  RepositoryUrl / PackageLicenseExpression / GenerateDocumentationFile は確認のみ・変更なし）。
+- `MiniMockito.Shims.Experimental`: `Version` 更新 + `Description` を Phase 20/21/23
+  （cross-assembly new interception + Easy API `ReplaceNew`）反映に更新し、experimental / test-only /
+  API may change / `[DoNotParallelize]` 必須 / BCL static 未対応 / production in-place rewrite はしない
+  を明記。
+
+### docs / README
+
+- README の `PackageReference` / `dotnet pack` 出力例のバージョンを新版に更新。
+- 実験パッケージ同梱 README（`src/MiniMockito.Shims.Experimental/README.md`）に Easy API
+  （`ReplaceNew`）と警告（test-only / production in-place rewrite なし / BCL static 未対応）を追記。
+- `RELEASE_NOTES.md` を新規作成し、両パッケージの版ごとの変更点を記載。
+
+### 検証（Release）
+
+- `dotnet clean` / `dotnet restore` / `dotnet build -c Release` / `dotnet test -c Release`
+- `dotnet pack -c Release -o artifacts`（両パッケージ）
+- nupkg 内容確認:
+  - `MiniMockito.Net`: `lib/net8.0`, `lib/net48`（dll + xml）
+  - `MiniMockito.Shims.Experimental`: `lib/net8.0`, `lib/net48`（dll + xml）
+  - 余計な test assembly が含まれていないこと
+
+### 対象外（Phase 22）
+
+- nuget.org への push、API key の保存、GitHub release 作成、新機能追加、破壊的変更。

@@ -8,9 +8,9 @@
     <RootNamespace>MiniMockito.Shims.Experimental</RootNamespace>
     <PackageId>MiniMockito.Shims.Experimental</PackageId>
     <Title>MiniMockito.Shims.Experimental</Title>
-    <Version>0.1.0-alpha.4</Version>
+    <Version>0.1.0-alpha.5</Version>
     <Authors>MiniMockito.Net contributors</Authors>
-    <Description>Experimental shim infrastructure for MiniMockito.Net (Phase 17). Provides build-time IL rewrite for newobj interception and user-defined static method mocking via an isolated AssemblyLoadContext, plus a high-level Shims.For&lt;T&gt;() facade (WithNew/WithStatic/New/Static/Create/CreateObject/Invoke). NOT stable — API may change in future phases. BCL static methods, generic methods, and expression-based shim APIs are not supported. Parallel test execution requires [assembly: DoNotParallelize].</Description>
+    <Description>EXPERIMENTAL, TEST-ONLY shim infrastructure for MiniMockito.Net. Build-time IL rewrite (Mono.Cecil) for newobj interception and user-defined static method mocking via an isolated AssemblyLoadContext, plus high-level facades: Shims.For&lt;T&gt;() (WithNew/WithStatic/New/Static) and the Easy API Shims.ForAssembly(path).ReplaceNew(...) including cross-assembly new interception (WithExternalTarget / RegisterShim by type, Type, or assembly path + type full name). NOT stable — public API may change in future phases. Does NOT rewrite production assemblies in place and does NOT support BCL static methods (e.g. DateTime.Now, File.ReadAllText), generic methods, or expression-based shim APIs. Parallel test execution is unsafe; tests must use [assembly: DoNotParallelize].</Description>
     <PackageTags>mocking;testing;mstest;shims;experimental</PackageTags>
     <PackageLicenseExpression>MIT</PackageLicenseExpression>
     <PackageReadmeFile>README.md</PackageReadmeFile>

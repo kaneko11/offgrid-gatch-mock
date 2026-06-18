@@ -130,13 +130,13 @@ samples/
 ```powershell
 # 1a. パッケージを生成（本体）
 dotnet pack src/MiniMockito -c Release -o artifacts
-# → artifacts/MiniMockito.Net.0.2.0-preview.5.nupkg
-# → artifacts/MiniMockito.Net.0.2.0-preview.5.snupkg  ← シンボルパッケージ
+# → artifacts/MiniMockito.Net.0.2.0-preview.7.nupkg
+# → artifacts/MiniMockito.Net.0.2.0-preview.7.snupkg  ← シンボルパッケージ
 
 # 1b. Experimental Shims も使う場合（実験的）
 dotnet pack src/MiniMockito.Shims.Experimental -c Release -o artifacts
-# → artifacts/MiniMockito.Shims.Experimental.0.1.0-alpha.3.nupkg
-# → artifacts/MiniMockito.Shims.Experimental.0.1.0-alpha.3.snupkg
+# → artifacts/MiniMockito.Shims.Experimental.0.1.0-alpha.5.nupkg
+# → artifacts/MiniMockito.Shims.Experimental.0.1.0-alpha.5.snupkg
 
 # 1c. 両方まとめてパックする
 dotnet pack -c Release -o artifacts
@@ -145,8 +145,8 @@ dotnet pack -c Release -o artifacts
 dotnet nuget add source C:\path\to\artifacts --name local-minimockito
 
 # 3. テストプロジェクトの .csproj に追加
-# <PackageReference Include="MiniMockito.Net" Version="0.2.0-preview.5" />
-# <PackageReference Include="MiniMockito.Shims.Experimental" Version="0.1.0-alpha.3" />  ← 実験的
+# <PackageReference Include="MiniMockito.Net" Version="0.2.0-preview.7" />
+# <PackageReference Include="MiniMockito.Shims.Experimental" Version="0.1.0-alpha.5" />  ← 実験的
 ```
 
 **Shims パッケージに含まれるもの:**
@@ -832,9 +832,9 @@ Verify(() => repo.FindById(1), Times.Once());
     <!-- <LangVersion>12.0</LangVersion>               -->
   </PropertyGroup>
   <ItemGroup>
-    <PackageReference Include="MiniMockito.Net" Version="0.2.0-preview.5" />
+    <PackageReference Include="MiniMockito.Net" Version="0.2.0-preview.7" />
     <!-- Shims を使う場合（実験的） -->
-    <PackageReference Include="MiniMockito.Shims.Experimental" Version="0.1.0-alpha.3" />
+    <PackageReference Include="MiniMockito.Shims.Experimental" Version="0.1.0-alpha.5" />
   </ItemGroup>
 </Project>
 ```
