@@ -459,3 +459,70 @@ public void Test_StaticClock_Now_IsShimmed()
 - `DbContext` 系などコンストラクタ／`Dispose` に副作用がある型は、実生成に依存しない fake を用意する。
 - BCL static method は引き続き未対応。
 - `[assembly: DoNotParallelize]` 必須。
+
+---
+
+## Phase 21 — external type API / string-based target / diagnostics（追記）
+
+### 目標
+
+Phase 20 の cross-assembly new interception を発展させ、テストプロジェクトが外部型を
+**コンパイル時参照できない**場合でも使える string-based API を追加し、失敗理由を diagnostics で
+追えるようにする。
+
+### 追加 API
+
+| API | 内容 |
+|-----|------|
+| `WithExternalTarget(string assemblyPath, string typeFullName)` | path + FullName で外部 target を解決・登録 |
+| `ResolveExternalType(string assemblyPath, string typeFullName)` | 外部型を `Type` に解決（失敗時 `ShimExternalTargetException`） |
+| `RegisterShim(string typeFullName, object fake)` | FullName ベースで fake 登録 |
+| `RegisterShim(string typeFullName, string assemblySimpleName, object fake)` | FullName + assembly simple name で登録 |
+| `CreateFakeExternal(Type targetType, params object[] args)` | 外部型の素のインスタンス生成（public/non-sealed/parameterless のみ） |
+| `CreateFakeExternal(string typeFullName, params object[] args)` | 登録済み外部型 FullName から素のインスタンス生成 |
+| `NewInterceptionHarness.Diagnostics` | harness レベル diagnostics ログ（`IReadOnlyList<string>`） |
+| `ShimExternalTargetException` | 外部型解決失敗の専用例外 |
+
+### string-based external target の方式
+
+- `ResolveExternalType` は `Assembly.LoadFrom(assemblyPath)` で外部アセンブリを **default load context**
+  にロードし、`asm.GetType(typeFullName)` で型を解決する。default context にロードすることで、
+  rewrite 後の ALC（外部 target アセンブリは parent から共有）と同一 identity になる。
+- 解決した `Type` から `ExternalNewTarget`（FullName + assembly simple name）を作り、Phase 20 と
+  同じ FullName ベースの registry キーで登録・照合する。
+- 解決失敗（ファイルなし / 型なし / ロード失敗）は `ShimExternalTargetException` を投げ、
+  searched path・candidate assembly・type full name・reason を含む。
+
+### diagnostics の追加内容
+
+- harness レベル（`Diagnostics`）: external assembly path / external type full name /
+  candidate assembly loaded / type resolution success・failure / external target registered /
+  target assembly being rewritten / registry key used / duplicate FullName risk /
+  external type fake creation supported・unsupported。
+- rewrite レベル（`LastRewriteResult.Diagnostics`）: external newobj detected / rewritten /
+  **skipped + skipped reason**（Phase 21 で追加）。
+- dispatch レベル（`ShimContext.LastDispatchDiagnostics`）: `ResolvedByFullNameFallback` /
+  `DuplicateFullNameRisk`。
+
+### CreateFakeExternal の対応範囲
+
+- `public` かつ `non-sealed`・`non-abstract` な class のみ。引数なしのときは public parameterless ctor 必須。
+- proxy / 挙動 override は生成しない（素のインスタンスのみ）。
+- 対応外は `NotSupportedException`（reason: `SealedTypeNotSupported` /
+  `PublicParameterlessConstructorNotFound` 等）。挙動を変えたい場合は手書き subclass /
+  `Mock.Class<T>()` を `RegisterShim(...)`。
+
+### 追加テスト
+
+- `tests/MiniMockito.Shims.Experimental.Tests/CrossAssemblyStringTargetTests.cs`（net8, 14 件）
+- `tests/MiniMockito.Shims.Experimental.Net48Tests/Net48CrossAssemblyStringTargetTests.cs`（net48, 7 件）
+- テスト用アセット `ExternalLib` に `SealedExternalContext` / `NoDefaultCtorContext` /
+  `ExternalByRefContext` を追加、`CrossAssemblySample` に by-ref ctor を呼ぶ `CreateByRefSeed` を追加。
+
+### 制約
+
+- 外部型は FullName ベース照合（同一 FullName が複数アセンブリにあると曖昧 → `Duplicate FullName risk`）。
+- `CreateFakeExternal` は public・non-sealed・non-abstract・parameterless ctor のみ。
+- `DbContext` 系は実生成に依存しない手動 fake を推奨。
+- BCL static method は引き続き未対応。external assembly 自体は rewrite しない。
+- `[assembly: DoNotParallelize]` 必須。

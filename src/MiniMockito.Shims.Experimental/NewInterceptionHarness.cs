@@ -40,6 +40,8 @@ public sealed class NewInterceptionHarness : IDisposable
     private readonly List<Type> _targetTypes = [];
     private readonly List<ExternalNewTarget> _externalTargets = [];
     private readonly List<Type> _staticTargetTypes = [];
+    private readonly List<string> _diagnostics = [];
+    private readonly Dictionary<string, HashSet<string>> _externalRegistryKeys = new(StringComparer.Ordinal);
     private RewrittenAssemblyLoader? _loader;
     private Assembly? _assembly;
     private bool _disposed;
@@ -58,6 +60,14 @@ public sealed class NewInterceptionHarness : IDisposable
     /// Gets the path of the rewritten output assembly, or <see langword="null"/> before a rewrite.
     /// </summary>
     public string? OutputAssemblyPath { get; private set; }
+
+    /// <summary>
+    /// Gets the harness-level diagnostics log (Phase 21).  Records external target resolution,
+    /// registration, the target assembly being rewritten, registry keys used, duplicate FullName
+    /// risk, and external fake creation outcomes.  Rewrite-time IL diagnostics (newobj detected /
+    /// rewritten / skipped) are available on <see cref="LastRewriteResult"/>.
+    /// </summary>
+    public IReadOnlyList<string> Diagnostics => _diagnostics;
 
     /// <summary>Creates a new harness builder.</summary>
     public static NewInterceptionHarness Create() => new();
@@ -88,8 +98,101 @@ public sealed class NewInterceptionHarness : IDisposable
     {
         ThrowHelper.ThrowIfDisposed(_disposed, this);
         ThrowHelper.ThrowIfNull(externalType);
-        _externalTargets.Add(new ExternalNewTarget(externalType));
+        AddExternalTarget(new ExternalNewTarget(externalType));
         return this;
+    }
+
+    /// <summary>
+    /// Adds an external (cross-assembly) <c>newobj</c> target identified by an assembly file path and
+    /// a type full name, <b>without</b> requiring a compile-time reference to the external type
+    /// (Phase 21).  The type is resolved via <see cref="ResolveExternalType(string, string)"/>.
+    /// </summary>
+    /// <param name="assemblyPath">Path to the assembly file that defines the external type.</param>
+    /// <param name="typeFullName">The full name of the external type (e.g. <c>"ExternalLib.ExternalDbContext"</c>).</param>
+    /// <exception cref="ShimExternalTargetException">
+    /// The assembly file does not exist, or the type full name was not found in the loaded assembly.
+    /// </exception>
+    public NewInterceptionHarness WithExternalTarget(string assemblyPath, string typeFullName)
+    {
+        ThrowHelper.ThrowIfDisposed(_disposed, this);
+        ThrowHelper.ThrowIfNullOrWhiteSpace(assemblyPath);
+        ThrowHelper.ThrowIfNullOrWhiteSpace(typeFullName);
+
+        var resolved = ResolveExternalType(assemblyPath, typeFullName);
+        AddExternalTarget(new ExternalNewTarget(resolved));
+        return this;
+    }
+
+    /// <summary>
+    /// Resolves an external type from an assembly file path and a type full name (Phase 21).
+    /// The assembly is loaded into the default load context so the resolved type shares its runtime
+    /// identity across the rewrite boundary.
+    /// </summary>
+    /// <param name="assemblyPath">Path to the assembly file that defines the external type.</param>
+    /// <param name="typeFullName">The full name of the external type.</param>
+    /// <returns>The resolved <see cref="Type"/>.</returns>
+    /// <exception cref="ShimExternalTargetException">
+    /// The assembly file does not exist, could not be loaded, or does not contain the requested type.
+    /// </exception>
+    public Type ResolveExternalType(string assemblyPath, string typeFullName)
+    {
+        ThrowHelper.ThrowIfNullOrWhiteSpace(assemblyPath);
+        ThrowHelper.ThrowIfNullOrWhiteSpace(typeFullName);
+
+        var fullPath = Path.GetFullPath(assemblyPath);
+        Diag($"External assembly path: {fullPath}");
+        Diag($"External type full name: {typeFullName}");
+
+        if (!File.Exists(fullPath))
+        {
+            Diag($"Type resolution: failure — external assembly file not found: {fullPath}");
+            throw new ShimExternalTargetException(string.Join(
+                Environment.NewLine,
+                "External target assembly file was not found.",
+                $"External assembly path: {fullPath}",
+                $"External type full name: {typeFullName}",
+                $"Searched path: {fullPath}",
+                "Reason: ExternalAssemblyFileNotFound",
+                "Hint: pass the path to the compiled external assembly (e.g. \"...\\ExternalLib.dll\")."));
+        }
+
+        Assembly assembly;
+        try
+        {
+            assembly = Assembly.LoadFrom(fullPath);
+        }
+        catch (Exception ex) when (ex is BadImageFormatException or FileLoadException or System.Security.SecurityException)
+        {
+            Diag($"Type resolution: failure — external assembly could not be loaded: {fullPath}");
+            throw new ShimExternalTargetException(string.Join(
+                Environment.NewLine,
+                "External target assembly could not be loaded.",
+                $"External assembly path: {fullPath}",
+                $"External type full name: {typeFullName}",
+                "Reason: ExternalAssemblyLoadFailed",
+                $"Hint: ensure the file is a valid managed assembly. ({ex.GetType().Name}: {ex.Message})"),
+                ex);
+        }
+
+        var simpleName = assembly.GetName().Name ?? "<unknown>";
+        Diag($"Candidate assembly loaded: {simpleName} from {fullPath}");
+
+        var type = assembly.GetType(typeFullName, throwOnError: false, ignoreCase: false);
+        if (type is null)
+        {
+            Diag($"Type resolution: failure — type '{typeFullName}' not found in assembly {simpleName}");
+            throw new ShimExternalTargetException(string.Join(
+                Environment.NewLine,
+                "External target type was not found in the loaded assembly.",
+                $"External assembly path: {fullPath}",
+                $"Candidate assembly: {simpleName}",
+                $"External type full name: {typeFullName}",
+                "Reason: ExternalTypeNotFound",
+                "Hint: check the namespace-qualified full name (case-sensitive) and the assembly path."));
+        }
+
+        Diag($"Type resolution: success — {type.FullName} from {simpleName}");
+        return type;
     }
 
     /// <summary>
@@ -138,6 +241,8 @@ public sealed class NewInterceptionHarness : IDisposable
 
         var outputPath = CreateOutputPath(inputAssemblyPath);
         OutputAssemblyPath = outputPath;
+
+        Diag($"Target assembly being rewritten: {Path.GetFullPath(inputAssemblyPath)}");
 
         LastRewriteResult = AssemblyRewriter.RewriteNewObj(
             inputAssemblyPath,
@@ -242,6 +347,103 @@ public sealed class NewInterceptionHarness : IDisposable
     }
 
     /// <summary>
+    /// Creates a plain instance of an external (cross-assembly) type for use as a shim fake (Phase 21).
+    /// Only <b>public, non-sealed, non-abstract</b> classes are supported; with no
+    /// <paramref name="args"/> a public parameterless constructor is required.  No proxy / behaviour
+    /// override is generated — for behaviour-overriding fakes construct a subclass or a class mock
+    /// yourself and register it via <see cref="RegisterShim(string, object)"/>.
+    /// </summary>
+    /// <param name="targetType">The external type to instantiate.</param>
+    /// <param name="args">Optional constructor arguments.</param>
+    /// <exception cref="NotSupportedException">The type is not supported (sealed, abstract, non-public, or no matching public constructor).</exception>
+    public object CreateFakeExternal(Type targetType, params object[] args)
+    {
+        ThrowHelper.ThrowIfDisposed(_disposed, this);
+        ThrowHelper.ThrowIfNull(targetType);
+
+        var unsupportedReason = GetExternalFakeUnsupportedReason(targetType, args);
+        if (unsupportedReason is not null)
+        {
+            Diag($"External type fake creation unsupported: {targetType.FullName} — {unsupportedReason}");
+            throw new NotSupportedException(string.Join(
+                Environment.NewLine,
+                "CreateFakeExternal cannot create an instance of this external type.",
+                $"Target type: {targetType.FullName}",
+                $"Calling assembly: {targetType.Assembly.GetName().Name}",
+                "Rewrite mode: CrossAssemblyNewObj",
+                $"Reason: {unsupportedReason}",
+                "Supported patterns:",
+                "  public, non-sealed, non-abstract class",
+                "  public parameterless constructor (when no args are supplied)",
+                "Unsupported patterns:",
+                "  sealed / abstract / non-public types",
+                "  no matching public constructor",
+                "Hint: construct the fake yourself (a hand-written subclass or Mock.Class<T>()) " +
+                "and call RegisterShim(typeFullName, fake)."));
+        }
+
+        var instance = (args.Length == 0
+                ? Activator.CreateInstance(targetType)
+                : Activator.CreateInstance(targetType, args))
+            ?? throw new InvalidOperationException(
+                $"Activator.CreateInstance returned null for {targetType.FullName}.");
+
+        Diag($"External type fake creation supported: {targetType.FullName}");
+        return instance;
+    }
+
+    /// <summary>
+    /// Creates a plain instance of an external type identified by <paramref name="typeFullName"/>
+    /// (Phase 21).  The type must have been registered with
+    /// <see cref="WithExternalTarget(string, string)"/> or another <c>WithExternalTarget</c> overload.
+    /// </summary>
+    /// <param name="typeFullName">The external type's full name.</param>
+    /// <param name="args">Optional constructor arguments.</param>
+    /// <exception cref="InvalidOperationException">The type full name is not a registered external target.</exception>
+    /// <exception cref="NotSupportedException">The type is not supported for fake creation.</exception>
+    public object CreateFakeExternal(string typeFullName, params object[] args)
+    {
+        ThrowHelper.ThrowIfDisposed(_disposed, this);
+        ThrowHelper.ThrowIfNullOrWhiteSpace(typeFullName);
+
+        if (!TryGetExternalTargetByFullName(typeFullName, out var target))
+        {
+            throw new InvalidOperationException(string.Join(
+                Environment.NewLine,
+                "CreateFakeExternal could not resolve the external type by full name.",
+                $"External type full name: {typeFullName}",
+                "Reason: ExternalTargetNotRegistered",
+                "Hint: register it first with WithExternalTarget<T>(), WithExternalTarget(Type), " +
+                "or WithExternalTarget(assemblyPath, typeFullName)."));
+        }
+
+        return CreateFakeExternal(target.OriginalType, args);
+    }
+
+    private static string? GetExternalFakeUnsupportedReason(Type targetType, object[] args)
+    {
+        if (!targetType.IsClass)
+            return "TargetTypeIsNotAClass";
+        if (!targetType.IsPublic && !targetType.IsNestedPublic)
+            return "TargetTypeIsNotPublic";
+        if (targetType.IsAbstract)
+            return "AbstractTypeNotSupported";
+        if (targetType.IsSealed)
+            return "SealedTypeNotSupported";
+        if (targetType.ContainsGenericParameters)
+            return "OpenGenericTypeNotSupported";
+
+        if (args.Length == 0
+            && targetType.GetConstructor(
+                BindingFlags.Public | BindingFlags.Instance, binder: null, Type.EmptyTypes, modifiers: null) is null)
+        {
+            return "PublicParameterlessConstructorNotFound";
+        }
+
+        return null;
+    }
+
+    /// <summary>
     /// Registers a catch-all shim rule for <typeparamref name="TTarget"/> in the active
     /// <see cref="ShimContext"/>.  The registered instance will be returned by
     /// <see cref="ShimDispatcher.New{T}"/> and <see cref="ShimDispatcher.NewWithArgs{T}"/>
@@ -272,6 +474,44 @@ public sealed class NewInterceptionHarness : IDisposable
         ThrowHelper.ThrowIfNull(externalType);
         ThrowHelper.ThrowIfNull(fakeInstance);
         RegisterShimCore(externalType, fakeInstance, matchers: null);
+    }
+
+    /// <summary>
+    /// Registers a catch-all shim for an external type identified by <paramref name="typeFullName"/>
+    /// (Phase 21).  The rule is matched by <see cref="Type.FullName"/>.  When the type was registered
+    /// with <see cref="WithExternalTarget(string, string)"/> its assembly simple name is used to
+    /// detect duplicate-FullName risk.
+    /// </summary>
+    /// <param name="typeFullName">The external type's full name.</param>
+    /// <param name="fake">The replacement instance.</param>
+    public void RegisterShim(string typeFullName, object fake)
+    {
+        ThrowHelper.ThrowIfDisposed(_disposed, this);
+        ThrowHelper.ThrowIfNullOrWhiteSpace(typeFullName);
+        ThrowHelper.ThrowIfNull(fake);
+
+        var assemblySimpleName = TryGetExternalTargetByFullName(typeFullName, out var target)
+            ? target.AssemblySimpleName
+            : string.Empty;
+        RegisterExternalShimByName(typeFullName, assemblySimpleName, fake);
+    }
+
+    /// <summary>
+    /// Registers a catch-all shim for an external type identified by <paramref name="typeFullName"/>
+    /// and <paramref name="assemblySimpleName"/> (Phase 21).  The FullName is the registry key; the
+    /// assembly simple name is recorded for duplicate-FullName risk diagnostics.
+    /// </summary>
+    /// <param name="typeFullName">The external type's full name.</param>
+    /// <param name="assemblySimpleName">The simple name of the assembly that defines the type.</param>
+    /// <param name="fake">The replacement instance.</param>
+    public void RegisterShim(string typeFullName, string assemblySimpleName, object fake)
+    {
+        ThrowHelper.ThrowIfDisposed(_disposed, this);
+        ThrowHelper.ThrowIfNullOrWhiteSpace(typeFullName);
+        ThrowHelper.ThrowIfNullOrWhiteSpace(assemblySimpleName);
+        ThrowHelper.ThrowIfNull(fake);
+
+        RegisterExternalShimByName(typeFullName, assemblySimpleName, fake);
     }
 
     /// <summary>
@@ -311,6 +551,8 @@ public sealed class NewInterceptionHarness : IDisposable
                 () => fakeInstance,
                 context.ContextId,
                 matchers);
+            Diag($"Registry key used: {external.TypeFullName} | {NormalizeAssemblyKey(external.AssemblySimpleName)}");
+            TrackExternalRegistryKey(external.TypeFullName, external.AssemblySimpleName);
             return;
         }
 
@@ -318,9 +560,50 @@ public sealed class NewInterceptionHarness : IDisposable
         context.Registry.RegisterNewRule(rewrittenType, () => fakeInstance, context.ContextId, matchers);
     }
 
-    private bool TryGetExternalTarget(Type type, out ExternalNewTarget target)
+    private void RegisterExternalShimByName(string typeFullName, string assemblySimpleName, object fake)
     {
-        var fullName = type.FullName;
+        EnsureRewritten();
+
+        var context = ShimContext.RequireCurrent();
+        context.EnsureActive();
+
+        var originalType = TryGetExternalTargetByFullName(typeFullName, out var target)
+            ? target.OriginalType
+            : typeof(object);
+
+        context.Registry.RegisterNewRuleByName(
+            typeFullName, assemblySimpleName, originalType, () => fake, context.ContextId, matchers: null);
+
+        Diag($"Registry key used: {typeFullName} | {NormalizeAssemblyKey(assemblySimpleName)}");
+        TrackExternalRegistryKey(typeFullName, assemblySimpleName);
+    }
+
+    private void TrackExternalRegistryKey(string typeFullName, string assemblySimpleName)
+    {
+        if (string.IsNullOrEmpty(assemblySimpleName))
+            return;
+
+        if (!_externalRegistryKeys.TryGetValue(typeFullName, out var assemblies))
+        {
+            assemblies = new HashSet<string>(StringComparer.Ordinal);
+            _externalRegistryKeys[typeFullName] = assemblies;
+        }
+
+        assemblies.Add(assemblySimpleName);
+        if (assemblies.Count > 1)
+        {
+            Diag($"Duplicate FullName risk: {typeFullName} registered for assemblies [{string.Join(", ", assemblies)}].");
+        }
+    }
+
+    private static string NormalizeAssemblyKey(string assemblySimpleName)
+        => string.IsNullOrEmpty(assemblySimpleName) ? "<fullname-only>" : assemblySimpleName;
+
+    private bool TryGetExternalTarget(Type type, out ExternalNewTarget target)
+        => TryGetExternalTargetByFullName(type.FullName, out target);
+
+    private bool TryGetExternalTargetByFullName(string? fullName, out ExternalNewTarget target)
+    {
         foreach (var candidate in _externalTargets)
         {
             if (string.Equals(candidate.TypeFullName, fullName, StringComparison.Ordinal))
@@ -333,6 +616,14 @@ public sealed class NewInterceptionHarness : IDisposable
         target = null!;
         return false;
     }
+
+    private void AddExternalTarget(ExternalNewTarget target)
+    {
+        _externalTargets.Add(target);
+        Diag($"External target registered: {target.TypeFullName} (assembly {target.AssemblySimpleName}).");
+    }
+
+    private void Diag(string message) => _diagnostics.Add(message);
 
     /// <summary>
     /// Invokes a public instance method on the given object using reflection and returns the result.

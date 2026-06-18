@@ -1044,3 +1044,42 @@ net48 テストからは net48 ターゲットが自動選択されます。
 - `DbContext` 系などコンストラクタ／`Dispose` に副作用がある型は、実生成に依存しない手動 fake を使う。
 - BCL static method は引き続き未対応。
 - `[assembly: DoNotParallelize]` 必須。
+
+---
+
+## 17. Phase 21 — string-based external target / diagnostics の net48 対応（追記）
+
+Phase 21 で追加した string-based 外部 target API（`WithExternalTarget(string, string)` /
+`RegisterShim(string, object)` / `RegisterShim(string, string, object)` /
+`CreateFakeExternal(...)` / `ResolveExternalType(...)`）と harness 診断（`Diagnostics`）は、
+net48 でもそのまま動作します。
+
+### 17.1 net48 での型解決と共有
+
+- `ResolveExternalType(assemblyPath, typeFullName)` は `Assembly.LoadFrom(assemblyPath)` を使う。
+  net48 では LoadFrom コンテキストにロードされるが、`RewrittenAssemblyLoader` の
+  `AppDomain.AssemblyResolve` ハンドラが **simple name で既ロードのアセンブリを返す**ため、
+  rewritten code が解決する外部型と同一 identity になる（fake 差し替えが成立）。
+- 既に同じ path からロード済みのアセンブリは、`LoadFrom` が同一インスタンスを返す。
+
+| 項目 | net8 | net48 |
+|------|------|-------|
+| 外部型の解決 | `Assembly.LoadFrom` → default ALC | `Assembly.LoadFrom` → LoadFrom context |
+| 共有方式 | ALC が parent へ委譲 | `AssemblyResolve` が simple name で既ロードを返す |
+| 例外型 | `ShimExternalTargetException` | 同左 |
+
+### 17.2 net48 テスト
+
+`tests/MiniMockito.Shims.Experimental.Net48Tests/Net48CrossAssemblyStringTargetTests.cs` で以下を確認:
+
+- `WithExternalTarget(string, string)` + `RegisterShim(string, ...)` での差し替え
+- 存在しない assembly path / typeFullName で `ShimExternalTargetException`
+- `CreateFakeExternal(string)` 成功、sealed 型で `NotSupportedException`
+- `Diagnostics` に external target registered / registry key が出る
+
+### 17.3 net48 特有の注意（Phase 21）
+
+- `CreateFakeExternal` は public・non-sealed・non-abstract・parameterless ctor のみ。proxy は生成しない。
+- 挙動を差し替えたい場合は手書き subclass を `RegisterShim(...)` する。
+- BCL static method は引き続き未対応。external assembly 自体は rewrite しない。
+- `[assembly: DoNotParallelize]` 必須。

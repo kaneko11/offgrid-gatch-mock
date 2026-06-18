@@ -35,6 +35,8 @@
 | `Create<IShimCreatable>()` による strongly-typed 生成 | ✅ 対応 (Phase 17) |
 | `CreateObject` + `Invoke` fallback | ✅ 対応 (Phase 17) |
 | cross-assembly `new ExternalType()` の差し替え（外部アセンブリ型の newobj） | ✅ 対応 (Phase 20) |
+| 外部型を assembly path + type full name の文字列で指定（コンパイル時参照不要） | ✅ 対応 (Phase 21) |
+| cross-assembly diagnostics（解決/登録/rewrite/skip/registry key/duplicate risk） | ✅ 対応 (Phase 21) |
 | ShimContext.Dispose() で確実に cleanup | ✅ 対応 |
 
 ---
@@ -543,6 +545,85 @@ using (var harness = NewInterceptionHarness.Create()
   Phase 20 でも未対応のままです。
 - **`[DoNotParallelize]` 必須**: 他の shim と同様、プロセス共有状態を使うため並列実行は禁止です。
 
+### 6c.4 型をコンパイル時参照できない場合（assembly path + type full name）— Phase 21
+
+テストプロジェクトが外部アセンブリ型を **コンパイル時参照したくない / できない** 場合は、
+assembly path と type full name の文字列で外部 target を指定できます。
+
+```csharp
+using (var harness = NewInterceptionHarness.Create()
+    .WithExternalTarget(
+        assemblyPath: externalAssemblyPath,            // 例: "...\\ExternalLib.dll"
+        typeFullName: "ExternalLib.ExternalDbContext")
+    .RewriteAssembly(targetAssemblyPath))
+{
+    using (ShimContext.Create())
+    {
+        // 型を参照できない場合、fake は手書き subclass / Mock.Class などで用意し、FullName で登録する
+        harness.RegisterShim("ExternalLib.ExternalDbContext", fake);
+
+        // FullName + assembly simple name で登録すると重複検出に使われる
+        // harness.RegisterShim("ExternalLib.ExternalDbContext", "ExternalLib", fake);
+
+        var service = harness.CreateObject("TargetApp.UserService");
+        var result = harness.Invoke<string>(service, "GetDisplayName", 1);
+    }
+}
+```
+
+関連 API:
+
+| API | 用途 |
+|-----|------|
+| `WithExternalTarget(string assemblyPath, string typeFullName)` | path + FullName で外部 target を解決・登録 |
+| `ResolveExternalType(string assemblyPath, string typeFullName)` | 外部型を `Type` として解決（解決失敗時は `ShimExternalTargetException`） |
+| `RegisterShim(string typeFullName, object fake)` | FullName ベースで fake を登録 |
+| `RegisterShim(string typeFullName, string assemblySimpleName, object fake)` | FullName + assembly simple name で登録 |
+| `CreateFakeExternal(Type targetType, params object[] args)` | 外部型の素のインスタンスを生成（後述の制約あり） |
+| `CreateFakeExternal(string typeFullName, params object[] args)` | 登録済み外部型 FullName から素のインスタンスを生成 |
+
+- **解決失敗時の例外**: assembly path が存在しない / typeFullName が見つからない場合は、
+  `ShimExternalTargetException` を投げます。メッセージには searched path・candidate assembly・
+  type full name・reason（`ExternalAssemblyFileNotFound` / `ExternalTypeNotFound` 等）を含みます。
+- **`CreateFakeExternal` の対応範囲**: `public` かつ `non-sealed`・`non-abstract` な class のみ。
+  引数なしの場合は public parameterless ctor が必須です。**proxy / 挙動 override は生成しません**
+  （素のインスタンスを返すだけ）。対応外の型では `NotSupportedException`
+  （reason: `SealedTypeNotSupported` / `PublicParameterlessConstructorNotFound` 等）を投げ、
+  手動 fake を `RegisterShim(...)` するよう案内します。
+- **挙動を差し替えたい場合**: `CreateFakeExternal` は素のインスタンスを返すだけなので、メソッドの
+  戻り値を変えたいときは手書き subclass か `Mock.Class<T>()` を `RegisterShim` してください。
+
+### 6c.5 diagnostics の読み方（Phase 21）
+
+cross-assembly の失敗理由を追えるよう、2 系統の diagnostics を用意しています。
+
+- **harness レベル**: `harness.Diagnostics`（`IReadOnlyList<string>`）
+  - `External assembly path: ...`
+  - `External type full name: ...`
+  - `Candidate assembly loaded: ...`
+  - `Type resolution: success / failure — ...`
+  - `External target registered: {FullName} (assembly {asm})`
+  - `Target assembly being rewritten: ...`
+  - `Registry key used: {FullName} | {asm}`
+  - `Duplicate FullName risk: {FullName} registered for assemblies [...]`
+  - `External type fake creation supported / unsupported: ...`
+- **rewrite レベル**: `harness.LastRewriteResult.Diagnostics`
+  - `External newobj detected: ...`
+  - `External newobj rewritten: ... assembly reference '...' preserved.`
+  - `External newobj skipped: ... Skipped reason: ...`
+- **dispatch レベル**: `ShimContext.LastDispatchDiagnostics`
+  - `ResolvedByFullNameFallback` / `DuplicateFullNameRisk`、`Format()` で人間可読化
+
+```csharp
+using var harness = NewInterceptionHarness.Create()
+    .WithExternalTarget(externalAssemblyPath, "ExternalLib.ExternalDbContext")
+    .RewriteAssembly(targetAssemblyPath);
+
+// 解決・登録・rewrite の経緯を確認
+foreach (var line in harness.Diagnostics) Console.WriteLine(line);
+foreach (var line in harness.LastRewriteResult!.Diagnostics) Console.WriteLine(line);
+```
+
 ---
 
 ## 7. ALC 隔離の仕組み
@@ -657,8 +738,10 @@ Skipped BCL static call at StaticClock.Now IL_0000: System.DateTime::get_Now()
   → `CreateObject(typeFullName)` + `Invoke(...)` を使う（`Create<T>()` が成功するのは共有 contract
   `IShimCreatable` を指定した場合のみ）
 - BCL static method (`DateTime.Now` 等) は差し替え不可
-- cross-assembly 外部型は FullName ベース照合（同一 FullName が複数アセンブリにあると曖昧）
+- cross-assembly 外部型は FullName ベース照合（同一 FullName が複数アセンブリにあると曖昧 → `Duplicate FullName risk` diagnostics）
 - cross-assembly 外部型に `CreateFake<T>()` は未対応（手動 fake + `RegisterShim` を使う）
+- `CreateFakeExternal(...)` は public・non-sealed・non-abstract・parameterless ctor のみ対応（proxy 生成はしない）
+- 外部型の挙動差し替えは手書き subclass / `Mock.Class<T>()` を `RegisterShim` する（`CreateFakeExternal` は素のインスタンスのみ）
 - expression-based static API (`Shim.Static(() => Clock.Now())`) は未実装
 - generic static method はスキップされる
 - by-ref / out パラメータを持つ static method はスキップされる

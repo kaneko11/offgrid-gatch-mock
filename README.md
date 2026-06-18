@@ -82,8 +82,8 @@ src/
 
 tests/
   MiniMockito.Tests/                              ← v2 テスト (77件)
-  MiniMockito.Shims.Experimental.Tests/          ← Shims テスト (259件)
-  MiniMockito.Shims.Experimental.Net48Tests/     ← Shims net48 テスト (39件)
+  MiniMockito.Shims.Experimental.Tests/          ← Shims テスト (273件)
+  MiniMockito.Shims.Experimental.Net48Tests/     ← Shims net48 テスト (46件)
   MiniMockito.Shims.Experimental.Sample/         ← Shims テスト用サンプルアセンブリ
   MiniMockito.Shims.Experimental.ExternalLib/    ← cross-assembly 用サンプル外部アセンブリ (Phase 20)
   MiniMockito.Shims.Experimental.CrossAssemblySample/ ← cross-assembly 用サンプル TargetApp (Phase 20)
@@ -98,11 +98,11 @@ samples/
 | アセンブリ | フレームワーク | 合格 | 失敗 |
 |-----------|--------------|------|------|
 | MiniMockito.Tests | net8.0 | 77 | 0 |
-| MiniMockito.Shims.Experimental.Tests | net8.0 | 259 | 0 |
-| MiniMockito.Shims.Experimental.Net48Tests | net48 | 39 | 0 |
+| MiniMockito.Shims.Experimental.Tests | net8.0 | 273 | 0 |
+| MiniMockito.Shims.Experimental.Net48Tests | net48 | 46 | 0 |
 | MiniMockito.Net48X86Tests | net48 | 26 | 0 |
 | MiniMockito.Sample.MSTest | net8.0 | 6 | 0 |
-| **合計** | | **407** | **0** |
+| **合計** | | **428** | **0** |
 
 ---
 
@@ -624,6 +624,34 @@ using (var harness = NewInterceptionHarness.Create()
 - `WithExternalTarget` に未登録の外部型 `newobj` は rewrite されず実コンストラクタのまま動きます。
 - `DbContext` 系などコンストラクタ／`Dispose` に副作用がある型は、実生成に依存しない fake を用意してください。
 - BCL static method（`DateTime.Now` 等）は引き続き対象外です。net8 / net48 両方で動作します。
+
+#### 外部型をコンパイル時参照できない場合（Phase 21）
+
+外部型を **コンパイル時参照したくない / できない** 場合は、assembly path と type full name の
+文字列で指定できます。
+
+```csharp
+using (var harness = NewInterceptionHarness.Create()
+    .WithExternalTarget(externalAssemblyPath, "ExternalLib.ExternalDbContext") // path + FullName
+    .RewriteAssembly(targetAssemblyPath))
+{
+    using (ShimContext.Create())
+    {
+        harness.RegisterShim("ExternalLib.ExternalDbContext", fake);           // FullName で登録
+        // harness.RegisterShim("ExternalLib.ExternalDbContext", "ExternalLib", fake); // FullName + asm 名
+
+        var service = harness.CreateObject("TargetApp.UserService");
+        var result = harness.Invoke<string>(service, "GetDisplayName", 1);
+    }
+}
+```
+
+- `WithExternalTarget(string, string)` / `ResolveExternalType(string, string)` は指定 assembly から
+  型を解決し、解決失敗時は `ShimExternalTargetException`（searched path・type full name・reason 付き）。
+- `CreateFakeExternal(Type / string, args)` は public・non-sealed・non-abstract・parameterless ctor の型のみ
+  対応（proxy は生成しない）。挙動を変えたい場合は手書き subclass / `Mock.Class<T>()` を `RegisterShim`。
+- 診断は `harness.Diagnostics`（解決・登録・registry key・duplicate FullName risk）と
+  `harness.LastRewriteResult.Diagnostics`（external newobj detected / rewritten / skipped + reason）で確認できます。
 
 ### コンストラクタ引数マッチャー
 
