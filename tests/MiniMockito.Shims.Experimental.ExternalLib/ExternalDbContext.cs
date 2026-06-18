@@ -34,4 +34,50 @@ namespace ExternalLib
         {
         }
     }
+
+    /// <summary>
+    /// A sealed sample external type — used to verify that <c>CreateFakeExternal</c> rejects sealed
+    /// types with a clear <see cref="System.NotSupportedException"/>.
+    /// </summary>
+    public sealed class SealedExternalContext
+    {
+        public string GetName(int id)
+        {
+            return "sealed-" + id;
+        }
+    }
+
+    /// <summary>
+    /// A sample external type without a public parameterless constructor — used to verify that
+    /// <c>CreateFakeExternal</c> rejects it when no constructor arguments are supplied.
+    /// </summary>
+    public class NoDefaultCtorContext
+    {
+        private readonly string _prefix;
+
+        public NoDefaultCtorContext(string prefix)
+        {
+            _prefix = prefix;
+        }
+
+        public string GetName(int id)
+        {
+            return _prefix + "-" + id;
+        }
+    }
+
+    /// <summary>
+    /// A sample external type whose constructor takes a by-ref parameter — its <c>newobj</c> is
+    /// detected but skipped by the rewriter (by-ref constructors are not supported), exercising the
+    /// "External newobj skipped" diagnostic.
+    /// </summary>
+    public class ExternalByRefContext
+    {
+        public ExternalByRefContext(ref int seed)
+        {
+            Seed = seed;
+        }
+
+        public int Seed { get; }
+    }
 }

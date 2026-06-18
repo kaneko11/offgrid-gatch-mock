@@ -88,7 +88,17 @@ public static class NewObjRewriter
                 var isExternal = externalTypeNames.Contains(declaringTypeName);
 
                 if (!ValidateDeclaringType(declaringType, diagnostics, method, instruction))
+                {
+                    if (isExternal)
+                    {
+                        diagnostics.Add(
+                            $"External newobj skipped: {method.DeclaringType.FullName}.{method.Name} " +
+                            $"IL_{instruction.Offset:X4}: new {declaringType.FullName}(). " +
+                            "Skipped reason: declaring type validation failed (must be a public, non-generic class).");
+                    }
+
                     continue;
+                }
 
                 if (isExternal)
                 {
@@ -122,6 +132,15 @@ public static class NewObjRewriter
                             importedDispatcherNewWithArgsMethod, diagnostics, method, instruction,
                             out var wrapperMethod))
                     {
+                        if (isExternal)
+                        {
+                            var reason = GetUnsupportedCtorParamReason(constructor) ?? "constructor not supported";
+                            diagnostics.Add(
+                                $"External newobj skipped: {method.DeclaringType.FullName}.{method.Name} " +
+                                $"IL_{instruction.Offset:X4}: new {declaringType.FullName}(...). " +
+                                $"Skipped reason: {reason}.");
+                        }
+
                         continue;
                     }
 
@@ -403,5 +422,25 @@ public static class NewObjRewriter
     {
         var tickIndex = fullName.IndexOf('`');
         return tickIndex < 0 ? fullName : fullName.Substring(0, tickIndex);
+    }
+
+    /// <summary>
+    /// Returns a human-readable reason describing why a constructor's parameters are unsupported by
+    /// the args-wrapper rewrite, or <see langword="null"/> if all parameters are supported.
+    /// </summary>
+    private static string? GetUnsupportedCtorParamReason(MethodReference constructor)
+    {
+        foreach (var param in constructor.Parameters)
+        {
+            if (param.ParameterType is ByReferenceType)
+                return "by-ref parameter is not supported";
+            if (param.ParameterType is GenericParameter)
+                return "generic parameter is not supported";
+            if (param.HasCustomAttributes && param.CustomAttributes.Any(a =>
+                    a.AttributeType.FullName == "System.ParamArrayAttribute"))
+                return "params parameter is not supported";
+        }
+
+        return null;
     }
 }

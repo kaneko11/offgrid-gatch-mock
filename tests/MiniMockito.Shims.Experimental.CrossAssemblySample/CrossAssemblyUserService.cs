@@ -24,5 +24,14 @@ namespace CrossAssemblySample
                 return context.GetTag();
             }
         }
+
+        // Constructs an external type whose constructor takes a by-ref parameter.
+        // The rewriter detects this cross-assembly newobj but skips it (by-ref ctor unsupported),
+        // exercising the "External newobj skipped" diagnostic.
+        public int CreateByRefSeed(int seed)
+        {
+            var context = new ExternalByRefContext(ref seed);
+            return context.Seed;
+        }
     }
 }
