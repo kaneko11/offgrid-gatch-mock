@@ -38,6 +38,7 @@ namespace MiniMockito.Shims.Experimental;
 public sealed class NewInterceptionHarness : IDisposable
 {
     private readonly List<Type> _targetTypes = [];
+    private readonly List<ExternalNewTarget> _externalTargets = [];
     private readonly List<Type> _staticTargetTypes = [];
     private RewrittenAssemblyLoader? _loader;
     private Assembly? _assembly;
@@ -66,6 +67,28 @@ public sealed class NewInterceptionHarness : IDisposable
     {
         ThrowHelper.ThrowIfDisposed(_disposed, this);
         _targetTypes.Add(typeof(T));
+        return this;
+    }
+
+    /// <summary>
+    /// Adds <typeparamref name="TExternal"/> — a type defined in an assembly <b>other</b> than the one
+    /// being rewritten — to the allowlist of cross-assembly <c>newobj</c> target types.
+    /// Register a replacement with <see cref="RegisterShim{TTarget}"/> or
+    /// <see cref="RegisterShim(Type, object)"/>; the recommended approach for external types is to
+    /// supply a manually constructed fake instance (e.g. a hand-written subclass or a class mock).
+    /// </summary>
+    public NewInterceptionHarness WithExternalTarget<TExternal>() where TExternal : class
+        => WithExternalTarget(typeof(TExternal));
+
+    /// <summary>
+    /// Adds <paramref name="externalType"/> — a type defined in an assembly <b>other</b> than the one
+    /// being rewritten — to the allowlist of cross-assembly <c>newobj</c> target types.
+    /// </summary>
+    public NewInterceptionHarness WithExternalTarget(Type externalType)
+    {
+        ThrowHelper.ThrowIfDisposed(_disposed, this);
+        ThrowHelper.ThrowIfNull(externalType);
+        _externalTargets.Add(new ExternalNewTarget(externalType));
         return this;
     }
 
@@ -122,14 +145,24 @@ public sealed class NewInterceptionHarness : IDisposable
             new RewriteOptions
             {
                 TargetTypes = _targetTypes.ToArray(),
+                ExternalTargetTypes = _externalTargets.Select(t => t.OriginalType).ToArray(),
                 StaticTargetTypes = _staticTargetTypes.ToArray(),
             });
 
         // Pass the original assembly directory so the ALC can probe for dependencies
         // that are not in the temp output directory.
         var originalDir = Path.GetDirectoryName(inputAssemblyPath);
+
+        // External target assemblies must be shared from the parent ALC so the external type keeps a
+        // single runtime identity across the rewrite boundary (required for fake substitution).
+        var sharedAssemblyNames = _externalTargets
+            .Select(t => t.AssemblySimpleName)
+            .Where(name => !string.IsNullOrEmpty(name))
+            .Distinct(StringComparer.OrdinalIgnoreCase)
+            .ToArray();
+
         _loader?.Dispose();
-        _loader = new RewrittenAssemblyLoader(outputPath, originalDir);
+        _loader = new RewrittenAssemblyLoader(outputPath, originalDir, sharedAssemblyNames);
         _assembly = _loader.Load();
         return this;
     }
@@ -149,13 +182,57 @@ public sealed class NewInterceptionHarness : IDisposable
     }
 
     /// <summary>
+    /// Creates an instance of the rewritten type named <paramref name="typeName"/> using its public
+    /// parameterless constructor.  Use this for service types whose compile-time reference is not
+    /// available to the test (e.g. the cross-assembly sample's caller type).
+    /// </summary>
+    /// <param name="typeName">The full type name as defined in the rewritten assembly.</param>
+    public object CreateObject(string typeName)
+    {
+        ThrowHelper.ThrowIfDisposed(_disposed, this);
+        ThrowHelper.ThrowIfNullOrWhiteSpace(typeName);
+        EnsureRewritten();
+
+        var type = _assembly!.GetType(typeName, throwOnError: true)!;
+        return Activator.CreateInstance(type)
+            ?? throw new InvalidOperationException(
+                $"Activator.CreateInstance returned null for {typeName}.");
+    }
+
+    /// <summary>
     /// Creates an instance of <typeparamref name="TTarget"/> from the rewritten assembly
     /// using the specified constructor arguments.  Pass no arguments to use the parameterless constructor.
     /// </summary>
+    /// <remarks>
+    /// <b>External targets:</b> <see cref="CreateFake{TTarget}"/> does not support cross-assembly
+    /// external targets registered with <see cref="WithExternalTarget{TExternal}"/>.  A rewritten
+    /// counterpart of an external type does not exist inside the rewritten assembly, and synthesizing
+    /// behaviour-overriding fakes is out of scope for this phase.  Construct the fake yourself
+    /// (a hand-written subclass or a class mock) and pass it to <see cref="RegisterShim{TTarget}"/>.
+    /// </remarks>
     public object CreateFake<TTarget>(params object[] constructorArgs) where TTarget : class
     {
         ThrowHelper.ThrowIfDisposed(_disposed, this);
         EnsureRewritten();
+
+        if (TryGetExternalTarget(typeof(TTarget), out var external))
+        {
+            throw new NotSupportedException(string.Join(
+                Environment.NewLine,
+                "CreateFake<T>() does not support external (cross-assembly) targets.",
+                $"Target type: {external.TypeFullName}",
+                $"Calling assembly: {external.AssemblySimpleName}",
+                "Rewrite mode: CrossAssemblyNewObj",
+                "Reason: ExternalTargetFakeNotSupported",
+                "Supported patterns:",
+                "  manually constructed fake registered via RegisterShim<T>(fake)",
+                "  manually constructed fake registered via RegisterShim(Type, fake)",
+                "Unsupported patterns:",
+                "  CreateFake<T>() for a type defined in another assembly",
+                "Hint: Create the fake yourself (a hand-written subclass or Mock.Class<T>()) " +
+                "and call RegisterShim<T>(fake)."));
+        }
+
         var type = GetRewrittenType(typeof(TTarget));
         return (constructorArgs.Length == 0
                 ? Activator.CreateInstance(type)
@@ -177,12 +254,24 @@ public sealed class NewInterceptionHarness : IDisposable
     {
         ThrowHelper.ThrowIfDisposed(_disposed, this);
         ThrowHelper.ThrowIfNull(fakeInstance);
-        EnsureRewritten();
+        RegisterShimCore(typeof(TTarget), fakeInstance, matchers: null);
+    }
 
-        var rewrittenType = GetRewrittenType(typeof(TTarget));
-        var context = ShimContext.RequireCurrent();
-        context.EnsureActive();
-        context.Registry.RegisterNewRule(rewrittenType, () => fakeInstance, context.ContextId);
+    /// <summary>
+    /// Registers a catch-all shim rule for the external (cross-assembly) type
+    /// <paramref name="externalType"/> in the active <see cref="ShimContext"/>.  The type must have
+    /// been registered with <see cref="WithExternalTarget(Type)"/>.  External rules are matched by
+    /// <see cref="Type.FullName"/>, so the registered fake is returned even though the
+    /// <c>newobj</c> call site may resolve the type through a different load context.
+    /// </summary>
+    /// <param name="externalType">The external target type, as seen by the test.</param>
+    /// <param name="fakeInstance">The replacement instance.</param>
+    public void RegisterShim(Type externalType, object fakeInstance)
+    {
+        ThrowHelper.ThrowIfDisposed(_disposed, this);
+        ThrowHelper.ThrowIfNull(externalType);
+        ThrowHelper.ThrowIfNull(fakeInstance);
+        RegisterShimCore(externalType, fakeInstance, matchers: null);
     }
 
     /// <summary>
@@ -200,15 +289,49 @@ public sealed class NewInterceptionHarness : IDisposable
     {
         ThrowHelper.ThrowIfDisposed(_disposed, this);
         ThrowHelper.ThrowIfNull(fakeInstance);
-        EnsureRewritten();
-
-        var rewrittenType = GetRewrittenType(typeof(TTarget));
-        var context = ShimContext.RequireCurrent();
-        context.EnsureActive();
 
         IReadOnlyList<IShimArgumentMatcher>? matcherList =
             matchers.Length == 0 ? null : matchers;
-        context.Registry.RegisterNewRule(rewrittenType, () => fakeInstance, context.ContextId, matcherList);
+        RegisterShimCore(typeof(TTarget), fakeInstance, matcherList);
+    }
+
+    private void RegisterShimCore(Type targetType, object fakeInstance, IReadOnlyList<IShimArgumentMatcher>? matchers)
+    {
+        EnsureRewritten();
+
+        var context = ShimContext.RequireCurrent();
+        context.EnsureActive();
+
+        if (TryGetExternalTarget(targetType, out var external))
+        {
+            context.Registry.RegisterNewRuleByName(
+                external.TypeFullName,
+                external.AssemblySimpleName,
+                external.OriginalType,
+                () => fakeInstance,
+                context.ContextId,
+                matchers);
+            return;
+        }
+
+        var rewrittenType = GetRewrittenType(targetType);
+        context.Registry.RegisterNewRule(rewrittenType, () => fakeInstance, context.ContextId, matchers);
+    }
+
+    private bool TryGetExternalTarget(Type type, out ExternalNewTarget target)
+    {
+        var fullName = type.FullName;
+        foreach (var candidate in _externalTargets)
+        {
+            if (string.Equals(candidate.TypeFullName, fullName, StringComparison.Ordinal))
+            {
+                target = candidate;
+                return true;
+            }
+        }
+
+        target = null!;
+        return false;
     }
 
     /// <summary>

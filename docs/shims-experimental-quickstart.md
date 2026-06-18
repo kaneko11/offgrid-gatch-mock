@@ -34,6 +34,7 @@
 | high-level facade `Shims.For<T>()`（new / static をまとめて扱う） | ✅ 対応 (Phase 17) |
 | `Create<IShimCreatable>()` による strongly-typed 生成 | ✅ 対応 (Phase 17) |
 | `CreateObject` + `Invoke` fallback | ✅ 対応 (Phase 17) |
+| cross-assembly `new ExternalType()` の差し替え（外部アセンブリ型の newobj） | ✅ 対応 (Phase 20) |
 | ShimContext.Dispose() で確実に cleanup | ✅ 対応 |
 
 ---
@@ -441,6 +442,109 @@ using (ShimContext.Create())
 
 ---
 
+## 6c. Advanced — cross-assembly new interception（Phase 20）
+
+これまでの new 差し替えは「リライト対象アセンブリ自身に定義された型」の `newobj` が対象でした。
+Phase 20 では、リライト対象アセンブリの中で呼ばれている **外部アセンブリ型** の `newobj` を
+差し替えられます。
+
+たとえば、`TargetApp.dll` 内で `new ExternalLib.ExternalDbContext()` を呼んでいる場合、
+`TargetApp.dll` だけを rewrite し、`ExternalLib.ExternalDbContext` を `WithExternalTarget<T>()`
+で登録できます（`ExternalLib.dll` そのものは書き換えません）。
+
+```csharp
+// ExternalLib.dll
+namespace ExternalLib
+{
+    public class ExternalDbContext : IDisposable
+    {
+        public virtual string GetName(int id) => "real-" + id;
+        public void Dispose() { }
+    }
+}
+
+// TargetApp.dll（こちらだけ rewrite する）
+namespace TargetApp
+{
+    public class UserService
+    {
+        public string GetDisplayName(int id)
+        {
+            using (var context = new ExternalLib.ExternalDbContext())
+                return context.GetName(id);
+        }
+    }
+}
+```
+
+### 6c.1 型をコンパイル時参照できる場合
+
+```csharp
+using (var harness = NewInterceptionHarness.Create()
+    .WithExternalTarget<ExternalDbContext>()
+    .RewriteAssembly(typeof(UserService).Assembly.Location))
+{
+    using (ShimContext.Create())
+    {
+        // 外部型の fake は「自分で作って RegisterShim する」のが第一推奨。
+        // 手書きの subclass でも、Mock.Class<ExternalDbContext>() でもよい（GetName は virtual）。
+        var fake = new FakeExternalDbContext();   // : ExternalDbContext, GetName を override
+        harness.RegisterShim<ExternalDbContext>(fake);
+
+        var service = harness.CreateObject("TargetApp.UserService");
+        var result = harness.Invoke<string>(service, "GetDisplayName", 1);
+        // → fake が返した値
+    }
+}
+```
+
+### 6c.2 Type で指定する場合
+
+```csharp
+var externalType = typeof(ExternalDbContext);
+
+using (var harness = NewInterceptionHarness.Create()
+    .WithExternalTarget(externalType)
+    .RewriteAssembly(targetAssemblyPath))
+{
+    using (ShimContext.Create())
+    {
+        harness.RegisterShim(externalType, fake);
+
+        var service = harness.CreateObject("TargetApp.UserService");
+        var result = harness.Invoke<string>(service, "GetDisplayName", 1);
+    }
+}
+```
+
+### 6c.3 仕組みと制約
+
+- **rewrite**: 外部型の `newobj` も内部型と同じく `ShimDispatcher.New<T>()` 経由に置換します。
+  外部型の `TypeReference` / `AssemblyReference` は `module.ImportReference` でそのまま維持され、
+  rewritten assembly は引き続き外部アセンブリ（例 `ExternalLib`）を参照します。
+- **型 identity の共有**: 外部 target に登録したアセンブリは isolated ALC ではなく
+  **parent (default) ALC から共有**されます。これにより、テスト側で作った fake（default ALC の
+  `ExternalDbContext` の subclass）が、rewritten code が期待する型と一致し、差し替えが成立します。
+- **shim key**: 外部型のルックアップは runtime `Type` の完全一致ではなく **`Type.FullName`
+  （+ assembly simple name）ベース**で照合します（`ShimDispatchDiagnostics.ResolvedByFullNameFallback`
+  が `true` になります）。
+- **FullName 重複の制約**: 同一 `FullName` の外部型が異なるアセンブリに複数存在する場合、
+  FullName ベース照合は曖昧になり得ます（`ShimDispatchDiagnostics.DuplicateFullNameRisk`）。
+  実運用ではこのような重複を避けてください。
+- **fake は手動が第一推奨**: 外部型については `CreateFake<T>()` は **未対応**で、
+  分かりやすい `NotSupportedException` を投げます。手書きの subclass か `Mock.Class<T>()` で fake を
+  作り、`RegisterShim<T>(fake)` / `RegisterShim(Type, fake)` してください。
+- **未登録の外部型**: `WithExternalTarget` に登録していない外部型の `newobj` は rewrite されず、
+  実コンストラクタのまま動きます。
+- **DbContext 系の注意**: EF の `DbContext` など、コンストラクタや `Dispose` に副作用がある型は、
+  実インスタンス生成に依存しない fake（必要メソッドだけ override した subclass）を用意してください。
+  `CreateFake<T>()` で安全に生成することはできません。
+- **BCL static は対象外**: `DateTime.Now` / `File.ReadAllText` などの BCL static method は
+  Phase 20 でも未対応のままです。
+- **`[DoNotParallelize]` 必須**: 他の shim と同様、プロセス共有状態を使うため並列実行は禁止です。
+
+---
+
 ## 7. ALC 隔離の仕組み
 
 ```
@@ -553,6 +657,8 @@ Skipped BCL static call at StaticClock.Now IL_0000: System.DateTime::get_Now()
   → `CreateObject(typeFullName)` + `Invoke(...)` を使う（`Create<T>()` が成功するのは共有 contract
   `IShimCreatable` を指定した場合のみ）
 - BCL static method (`DateTime.Now` 等) は差し替え不可
+- cross-assembly 外部型は FullName ベース照合（同一 FullName が複数アセンブリにあると曖昧）
+- cross-assembly 外部型に `CreateFake<T>()` は未対応（手動 fake + `RegisterShim` を使う）
 - expression-based static API (`Shim.Static(() => Clock.Now())`) は未実装
 - generic static method はスキップされる
 - by-ref / out パラメータを持つ static method はスキップされる

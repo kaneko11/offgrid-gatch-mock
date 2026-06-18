@@ -1,0 +1,23 @@
+<Project Sdk="Microsoft.NET.Sdk">
+
+  <!--
+    Generic sample "TargetApp" assembly.  It constructs ExternalLib types via `new`, so the
+    rewriter must intercept cross-assembly newobj instructions whose declaring type lives in
+    ExternalLib.dll.  The assembly simple name is "CrossAssemblySample" (a generic stand-in for the
+    real application assembly; no project-specific names are used).
+  -->
+  <PropertyGroup>
+    <TargetFrameworks>net48;net8.0</TargetFrameworks>
+    <LangVersion>latest</LangVersion>
+    <Nullable>enable</Nullable>
+    <ImplicitUsings>enable</ImplicitUsings>
+    <AssemblyName>CrossAssemblySample</AssemblyName>
+    <RootNamespace>CrossAssemblySample</RootNamespace>
+    <IsPackable>false</IsPackable>
+  </PropertyGroup>
+
+  <ItemGroup>
+    <ProjectReference Include="..\MiniMockito.Shims.Experimental.ExternalLib\MiniMockito.Shims.Experimental.ExternalLib.csproj" />
+  </ItemGroup>
+
+</Project>

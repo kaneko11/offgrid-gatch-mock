@@ -1,0 +1,19 @@
+<Project Sdk="Microsoft.NET.Sdk">
+
+  <!--
+    Generic sample "external" library used by the cross-assembly new-interception PoC.
+    The assembly simple name is intentionally "ExternalLib" (not the long project name) so the
+    rewritten TargetApp references it as [ExternalLib]ExternalLib.ExternalDbContext, matching the
+    generic example in the docs.  No real project-specific type/DLL names are used here.
+  -->
+  <PropertyGroup>
+    <TargetFrameworks>net48;net8.0</TargetFrameworks>
+    <LangVersion>latest</LangVersion>
+    <Nullable>enable</Nullable>
+    <ImplicitUsings>enable</ImplicitUsings>
+    <AssemblyName>ExternalLib</AssemblyName>
+    <RootNamespace>ExternalLib</RootNamespace>
+    <IsPackable>false</IsPackable>
+  </PropertyGroup>
+
+</Project>

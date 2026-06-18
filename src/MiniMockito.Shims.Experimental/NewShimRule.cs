@@ -5,7 +5,7 @@
 /// </summary>
 public sealed class NewShimRule
 {
-    internal NewShimRule(Type targetType, Func<object?> factory, Guid contextId, long registrationOrder, IReadOnlyList<IShimArgumentMatcher>? matchers = null)
+    internal NewShimRule(Type targetType, Func<object?> factory, Guid contextId, long registrationOrder, IReadOnlyList<IShimArgumentMatcher>? matchers = null, string? externalAssemblySimpleName = null)
     {
         ThrowHelper.ThrowIfNull(targetType);
         ThrowHelper.ThrowIfNull(factory);
@@ -14,6 +14,7 @@ public sealed class NewShimRule
         ContextId = contextId;
         RegistrationOrder = registrationOrder;
         ArgumentMatchers = matchers;
+        ExternalAssemblySimpleName = externalAssemblySimpleName;
     }
 
     internal NewShimRule(Type targetType, Func<object?[], object?> argsFactory, Guid contextId, long registrationOrder, IReadOnlyList<IShimArgumentMatcher>? matchers = null)
@@ -57,6 +58,16 @@ public sealed class NewShimRule
     /// Gets the context-based replacement factory, or <see langword="null"/> when a parameterless or args factory is registered.
     /// </summary>
     public Func<ShimConstructorContext, object?>? ContextFactory { get; }
+
+    /// <summary>
+    /// Gets the simple name of the assembly that defines the external target type, or
+    /// <see langword="null"/> for an internal (same-assembly) target.  External rules are keyed
+    /// by <see cref="Type.FullName"/> rather than by runtime <see cref="Type"/> identity.
+    /// </summary>
+    public string? ExternalAssemblySimpleName { get; }
+
+    /// <summary>Gets a value indicating whether this rule targets a cross-assembly (external) type.</summary>
+    public bool IsExternal => ExternalAssemblySimpleName is not null;
 
     /// <summary>
     /// Gets the context ID that owns this rule.

@@ -23,12 +23,16 @@ public sealed class ShimDispatchDiagnostics
         Type targetType,
         IReadOnlyList<object?> actualArguments,
         IReadOnlyList<TriedRuleInfo> triedRules,
-        bool matchFound)
+        bool matchFound,
+        bool resolvedByFullNameFallback = false,
+        bool duplicateFullNameRisk = false)
     {
         TargetType = targetType;
         ActualArguments = actualArguments;
         TriedRules = triedRules;
         MatchFound = matchFound;
+        ResolvedByFullNameFallback = resolvedByFullNameFallback;
+        DuplicateFullNameRisk = duplicateFullNameRisk;
     }
 
     /// <summary>Gets the type that was being constructed.</summary>
@@ -49,6 +53,20 @@ public sealed class ShimDispatchDiagnostics
 
     /// <summary>Gets a value indicating whether the real constructor was used as a fallback (i.e. no rule matched).</summary>
     public bool FalledBack => !MatchFound;
+
+    /// <summary>
+    /// Gets a value indicating whether the matching rule was resolved through the cross-assembly
+    /// <see cref="Type.FullName"/> fallback lookup (used for external targets) rather than an exact
+    /// runtime <see cref="Type"/> match.
+    /// </summary>
+    public bool ResolvedByFullNameFallback { get; }
+
+    /// <summary>
+    /// Gets a value indicating whether more than one external rule shares the matched
+    /// <see cref="Type.FullName"/> but originates from differently named assemblies.  When
+    /// <see langword="true"/> the FullName-based lookup may be ambiguous.
+    /// </summary>
+    public bool DuplicateFullNameRisk { get; }
 
     /// <summary>
     /// Returns a human-readable formatted diagnostics string suitable for debug output and test assertions.
@@ -105,6 +123,14 @@ public sealed class ShimDispatchDiagnostics
                 if (!r.Matched && !string.IsNullOrEmpty(r.MismatchReason))
                     sb.AppendLine($"    reason: {r.MismatchReason}");
             }
+        }
+
+        if (ResolvedByFullNameFallback)
+        {
+            sb.AppendLine();
+            sb.AppendLine("Shim lookup: resolved by FullName fallback (external target).");
+            if (DuplicateFullNameRisk)
+                sb.AppendLine("Warning: duplicate FullName risk — multiple external rules share this FullName across assemblies.");
         }
 
         if (FalledBack)

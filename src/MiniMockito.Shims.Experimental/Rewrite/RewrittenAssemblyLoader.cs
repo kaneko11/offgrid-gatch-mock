@@ -33,12 +33,22 @@ public sealed class RewrittenAssemblyLoader : IDisposable
     /// Optional directory of the original (non-rewritten) assembly.
     /// Used as a fallback probing path for dependencies not resolvable from the temp directory.
     /// </param>
-    public RewrittenAssemblyLoader(string assemblyPath, string? originalAssemblyDirectory = null)
+    /// <param name="sharedAssemblyNames">
+    /// Optional simple names of assemblies (e.g. external <c>newobj</c> target assemblies) that must
+    /// be shared from the parent/default load context rather than loaded into isolation, so that
+    /// external types keep a single runtime identity across the rewrite boundary.
+    /// On .NET Framework these are already shared via the <see cref="AppDomain.AssemblyResolve"/>
+    /// handler, which returns already-loaded assemblies by simple name.
+    /// </param>
+    public RewrittenAssemblyLoader(
+        string assemblyPath,
+        string? originalAssemblyDirectory = null,
+        IEnumerable<string>? sharedAssemblyNames = null)
     {
         ThrowHelper.ThrowIfNullOrWhiteSpace(assemblyPath);
         AssemblyPath = Path.GetFullPath(assemblyPath);
 #if !NETFRAMEWORK
-        _context = new ShimAssemblyLoadContext(AssemblyPath, originalAssemblyDirectory);
+        _context = new ShimAssemblyLoadContext(AssemblyPath, originalAssemblyDirectory, sharedAssemblyNames);
 #else
         _originalDirectory = originalAssemblyDirectory;
 #endif

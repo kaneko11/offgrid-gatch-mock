@@ -82,9 +82,11 @@ src/
 
 tests/
   MiniMockito.Tests/                              ← v2 テスト (77件)
-  MiniMockito.Shims.Experimental.Tests/          ← Shims テスト (235件)
-  MiniMockito.Shims.Experimental.Net48Tests/     ← Shims net48 テスト (23件)
+  MiniMockito.Shims.Experimental.Tests/          ← Shims テスト (259件)
+  MiniMockito.Shims.Experimental.Net48Tests/     ← Shims net48 テスト (39件)
   MiniMockito.Shims.Experimental.Sample/         ← Shims テスト用サンプルアセンブリ
+  MiniMockito.Shims.Experimental.ExternalLib/    ← cross-assembly 用サンプル外部アセンブリ (Phase 20)
+  MiniMockito.Shims.Experimental.CrossAssemblySample/ ← cross-assembly 用サンプル TargetApp (Phase 20)
 
 samples/
   MiniMockito.Sample/                       ← コンソールサンプル
@@ -96,10 +98,11 @@ samples/
 | アセンブリ | フレームワーク | 合格 | 失敗 |
 |-----------|--------------|------|------|
 | MiniMockito.Tests | net8.0 | 77 | 0 |
-| MiniMockito.Shims.Experimental.Tests | net8.0 | 235 | 0 |
-| MiniMockito.Shims.Experimental.Net48Tests | net48 | 23 | 0 |
+| MiniMockito.Shims.Experimental.Tests | net8.0 | 259 | 0 |
+| MiniMockito.Shims.Experimental.Net48Tests | net48 | 39 | 0 |
+| MiniMockito.Net48X86Tests | net48 | 26 | 0 |
 | MiniMockito.Sample.MSTest | net8.0 | 6 | 0 |
-| **合計** | | **341** | **0** |
+| **合計** | | **407** | **0** |
 
 ---
 
@@ -589,6 +592,38 @@ public class RepositoryShimLowLevelTests
     }
 }
 ```
+
+### クロスアセンブリの new 差し替え（Phase 20）
+
+リライト対象アセンブリ内で呼ばれている **外部アセンブリ型** の `new` も差し替えられます。  
+たとえば `TargetApp.dll` 内で `new ExternalLib.ExternalDbContext()` を呼んでいる場合、
+`TargetApp.dll` だけを rewrite し、`ExternalLib.ExternalDbContext` を `WithExternalTarget<T>()`
+で登録します（`ExternalLib.dll` そのものは書き換えません）。
+
+```csharp
+using (var harness = NewInterceptionHarness.Create()
+    .WithExternalTarget<ExternalDbContext>()                 // 外部型を登録
+    .RewriteAssembly(typeof(UserService).Assembly.Location)) // TargetApp.dll を rewrite
+{
+    using (ShimContext.Create())
+    {
+        // 外部型の fake は「自分で作って RegisterShim する」のが第一推奨
+        // （手書き subclass でも Mock.Class<ExternalDbContext>() でも可）
+        var fake = new FakeExternalDbContext();
+        harness.RegisterShim<ExternalDbContext>(fake);        // RegisterShim(Type, fake) も可
+
+        var service = harness.CreateObject("TargetApp.UserService");
+        var result = harness.Invoke<string>(service, "GetDisplayName", 1);
+    }
+}
+```
+
+- 外部型の `TypeReference` / `AssemblyReference` は維持され、外部型は parent load context から共有されます。
+- shim key は `Type.FullName`（+ assembly simple name）ベース。同一 FullName が複数アセンブリにあると曖昧です。
+- 外部型に `CreateFake<T>()` は **未対応**（`NotSupportedException`）。手動 fake + `RegisterShim` を使います。
+- `WithExternalTarget` に未登録の外部型 `newobj` は rewrite されず実コンストラクタのまま動きます。
+- `DbContext` 系などコンストラクタ／`Dispose` に副作用がある型は、実生成に依存しない fake を用意してください。
+- BCL static method（`DateTime.Now` 等）は引き続き対象外です。net8 / net48 両方で動作します。
 
 ### コンストラクタ引数マッチャー
 

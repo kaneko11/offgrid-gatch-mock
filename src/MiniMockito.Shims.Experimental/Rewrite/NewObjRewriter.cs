@@ -20,15 +20,30 @@ public static class NewObjRewriter
         ThrowHelper.ThrowIfNull(options);
         ThrowHelper.ThrowIfNull(diagnostics);
 
-        var targetTypeNames = options.TargetTypes
+        var internalTypeNames = options.TargetTypes
             .Select(type => type.FullName)
             .Where(name => name is not null)
+            .Select(name => name!)
             .ToHashSet(StringComparer.Ordinal);
 
-        if (targetTypeNames.Count == 0)
+        var externalTypeNames = options.ExternalTargetTypes
+            .Select(type => type.FullName)
+            .Where(name => name is not null)
+            .Select(name => name!)
+            .ToHashSet(StringComparer.Ordinal);
+
+        var allTargetNames = new HashSet<string>(internalTypeNames, StringComparer.Ordinal);
+        allTargetNames.UnionWith(externalTypeNames);
+
+        if (allTargetNames.Count == 0)
         {
             diagnostics.Add("No allowlisted target types were provided. No newobj call sites were rewritten.");
             return 0;
+        }
+
+        foreach (var externalName in externalTypeNames)
+        {
+            diagnostics.Add($"External target registered: {externalName}.");
         }
 
         var dispatcherNewMethod = typeof(ShimDispatcher).GetMethod(nameof(ShimDispatcher.New), Type.EmptyTypes);
@@ -66,11 +81,22 @@ public static class NewObjRewriter
                     continue;
 
                 var declaringType = constructor.DeclaringType;
-                if (!targetTypeNames.Contains(RemoveGenericArity(declaringType.FullName)))
+                var declaringTypeName = RemoveGenericArity(declaringType.FullName);
+                if (!allTargetNames.Contains(declaringTypeName))
                     continue;
+
+                var isExternal = externalTypeNames.Contains(declaringTypeName);
 
                 if (!ValidateDeclaringType(declaringType, diagnostics, method, instruction))
                     continue;
+
+                if (isExternal)
+                {
+                    var externalAssembly = declaringType.Scope?.Name ?? "<unknown>";
+                    diagnostics.Add(
+                        $"External newobj detected: {method.DeclaringType.FullName}.{method.Name} " +
+                        $"IL_{instruction.Offset:X4}: new {declaringType.FullName}() from assembly {externalAssembly}.");
+                }
 
                 if (constructor.Parameters.Count == 0)
                 {
@@ -82,6 +108,12 @@ public static class NewObjRewriter
                     diagnostics.Add(
                         $"Rewrote {method.DeclaringType.FullName}.{method.Name} IL_{instruction.Offset:X4}: " +
                         $"new {declaringType.FullName}() -> ShimDispatcher.New<{declaringType.FullName}>().");
+                    if (isExternal)
+                    {
+                        diagnostics.Add(
+                            $"External newobj rewritten: {declaringType.FullName} TypeReference imported; " +
+                            $"assembly reference '{declaringType.Scope?.Name ?? "<unknown>"}' preserved.");
+                    }
                 }
                 else
                 {
@@ -101,6 +133,12 @@ public static class NewObjRewriter
                     diagnostics.Add(
                         $"Rewrote {method.DeclaringType.FullName}.{method.Name} IL_{instruction.Offset:X4}: " +
                         $"new {declaringType.FullName}({paramSig}) -> ShimDispatcher.NewWithArgs<{declaringType.FullName}>(args).");
+                    if (isExternal)
+                    {
+                        diagnostics.Add(
+                            $"External newobj rewritten: {declaringType.FullName} TypeReference imported; " +
+                            $"assembly reference '{declaringType.Scope?.Name ?? "<unknown>"}' preserved.");
+                    }
                 }
             }
         }
