@@ -36,6 +36,18 @@ namespace ExternalLib
     }
 
     /// <summary>
+    /// A second sample external type used to demonstrate replacing multiple external <c>new</c> calls
+    /// in a single session.  <see cref="Tag"/> is virtual so a fake subclass can override it.
+    /// </summary>
+    public class ExternalLogger
+    {
+        public virtual string Tag()
+        {
+            return "real-log";
+        }
+    }
+
+    /// <summary>
     /// A sealed sample external type — used to verify that <c>CreateFakeExternal</c> rejects sealed
     /// types with a clear <see cref="System.NotSupportedException"/>.
     /// </summary>

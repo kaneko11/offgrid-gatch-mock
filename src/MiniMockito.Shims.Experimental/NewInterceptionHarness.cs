@@ -72,11 +72,26 @@ public sealed class NewInterceptionHarness : IDisposable
     /// <summary>Creates a new harness builder.</summary>
     public static NewInterceptionHarness Create() => new();
 
+    /// <summary>
+    /// Gets the rewritten assembly loaded into the isolated load context, or <see langword="null"/>
+    /// before a rewrite has run.  Used by the high-level <see cref="Shims"/> facade.
+    /// </summary>
+    internal Assembly? LoadedAssembly => _assembly;
+
     /// <summary>Adds <typeparamref name="T"/> to the allowlist of <c>newobj</c> target types to rewrite.</summary>
     public NewInterceptionHarness WithTarget<T>() where T : class
     {
         ThrowHelper.ThrowIfDisposed(_disposed, this);
         _targetTypes.Add(typeof(T));
+        return this;
+    }
+
+    /// <summary>Adds <paramref name="targetType"/> to the allowlist of <c>newobj</c> target types to rewrite.</summary>
+    public NewInterceptionHarness WithTarget(Type targetType)
+    {
+        ThrowHelper.ThrowIfDisposed(_disposed, this);
+        ThrowHelper.ThrowIfNull(targetType);
+        _targetTypes.Add(targetType);
         return this;
     }
 

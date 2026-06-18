@@ -1083,3 +1083,56 @@ net48 でもそのまま動作します。
 - 挙動を差し替えたい場合は手書き subclass を `RegisterShim(...)` する。
 - BCL static method は引き続き未対応。external assembly 自体は rewrite しない。
 - `[assembly: DoNotParallelize]` 必須。
+
+---
+
+## 18. Phase 23 — Easy Shims API（ReplaceNew）の net48 対応（追記）
+
+`Shims.ForAssembly(...)` + `ReplaceNew(...)` の Easy API は net48 でもそのまま動作します。
+C# 7.3 では `using var` が使えないため、`using (...) { }` の statement 形式を使います。
+
+### 18.1 net48 / C# 7.3 sample（using statement 形式）
+
+```csharp
+using System;
+using System.IO;
+using ExternalLib;
+using Microsoft.VisualStudio.TestTools.UnitTesting;
+using MiniMockito.Shims.Experimental;
+
+[TestClass]
+[DoNotParallelize]
+public sealed class Net48EasyApiSample
+{
+    private sealed class FakeExternalDbContext : ExternalDbContext
+    {
+        public override string GetName(int id) { return "fake-" + id; }
+    }
+
+    [TestMethod]
+    public void ReplaceNew_StringBased_OnNet48()
+    {
+        string targetAssemblyPath = typeof(CrossAssemblySample.CrossAssemblyUserService).Assembly.Location;
+        string externalAssemblyPath = Path.Combine(AppDomain.CurrentDomain.BaseDirectory, "ExternalLib.dll");
+
+        using (Shims shims = Shims.ForAssembly(targetAssemblyPath)
+            .ReplaceNew(externalAssemblyPath, "ExternalLib.ExternalDbContext", new FakeExternalDbContext()))
+        {
+            object service = shims.CreateObject("CrossAssemblySample.CrossAssemblyUserService");
+            string result = shims.Invoke<string>(service, "GetDisplayName", 1);
+
+            Assert.AreEqual("fake-1", result);
+        }
+    }
+}
+```
+
+### 18.2 net48 特有の注意（Phase 23）
+
+- internal target の fake は rewrite 済み identity が必要なため、factory 形式
+  `ReplaceNew<T>(delegate(Shims s) { return s.CreateFake<T>("..."); })` を使う（C# 7.3 では匿名 delegate でも可）。
+- `Create<T>()` が安全に cast できない場合は `CreateObject(...)` + `Invoke<TResult>(...)` を使う。
+- same target type への複数 `ReplaceNew` は last stub wins。
+- rewrite 確定後の `ReplaceNew(...)` は分かりやすい例外。
+- BCL static method は未対応。external assembly 自体は rewrite しない。
+- `[assembly: DoNotParallelize]` 必須。

@@ -33,5 +33,41 @@ namespace CrossAssemblySample
             var context = new ExternalByRefContext(ref seed);
             return context.Seed;
         }
+
+        // Constructs two external types (ExternalDbContext, ExternalLogger) and one internal type
+        // (InternalGreeter, defined in this same assembly), so a single session can mix internal and
+        // external new-interception targets.
+        public string Run(int id)
+        {
+            using (var db = new ExternalDbContext())
+            {
+                var logger = new ExternalLogger();
+                var greeter = new InternalGreeter();
+                return greeter.Decorate(db.GetName(id) + "|" + logger.Tag());
+            }
+        }
+    }
+
+    /// <summary>
+    /// An <b>internal</b> sample type (defined in the same assembly that is rewritten).  Used to verify
+    /// that internal and external <c>new</c> targets can be mixed in one Easy-API session.
+    /// </summary>
+    public class InternalGreeter
+    {
+        private readonly string _mode;
+
+        public InternalGreeter() : this("real")
+        {
+        }
+
+        public InternalGreeter(string mode)
+        {
+            _mode = mode;
+        }
+
+        public virtual string Decorate(string value)
+        {
+            return _mode + "(" + value + ")";
+        }
     }
 }

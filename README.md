@@ -82,8 +82,8 @@ src/
 
 tests/
   MiniMockito.Tests/                              ← v2 テスト (77件)
-  MiniMockito.Shims.Experimental.Tests/          ← Shims テスト (273件)
-  MiniMockito.Shims.Experimental.Net48Tests/     ← Shims net48 テスト (46件)
+  MiniMockito.Shims.Experimental.Tests/          ← Shims テスト (284件)
+  MiniMockito.Shims.Experimental.Net48Tests/     ← Shims net48 テスト (53件)
   MiniMockito.Shims.Experimental.Sample/         ← Shims テスト用サンプルアセンブリ
   MiniMockito.Shims.Experimental.ExternalLib/    ← cross-assembly 用サンプル外部アセンブリ (Phase 20)
   MiniMockito.Shims.Experimental.CrossAssemblySample/ ← cross-assembly 用サンプル TargetApp (Phase 20)
@@ -98,11 +98,11 @@ samples/
 | アセンブリ | フレームワーク | 合格 | 失敗 |
 |-----------|--------------|------|------|
 | MiniMockito.Tests | net8.0 | 77 | 0 |
-| MiniMockito.Shims.Experimental.Tests | net8.0 | 273 | 0 |
-| MiniMockito.Shims.Experimental.Net48Tests | net48 | 46 | 0 |
+| MiniMockito.Shims.Experimental.Tests | net8.0 | 284 | 0 |
+| MiniMockito.Shims.Experimental.Net48Tests | net48 | 53 | 0 |
 | MiniMockito.Net48X86Tests | net48 | 26 | 0 |
 | MiniMockito.Sample.MSTest | net8.0 | 6 | 0 |
-| **合計** | | **428** | **0** |
+| **合計** | | **446** | **0** |
 
 ---
 
@@ -504,6 +504,62 @@ public class TimedService
 // AssemblyInfo.cs — process-wide な state の並列衝突を防ぐ
 [assembly: DoNotParallelize]
 ```
+
+### Easy Shims API（`ReplaceNew` facade・Phase 23・最推奨）
+
+cross-assembly の `new` 差し替えは、`Shims.ForAssembly(...)` + `ReplaceNew(...)` で短く書けます。
+`NewInterceptionHarness` / `ShimContext` / `WithExternalTarget` / `RegisterShim` を直接書く必要はありません。
+
+```csharp
+// 外部型を assembly path + type full name で指定（コンパイル時参照不要）
+using (var shims = Shims.ForAssembly(targetAssemblyPath)
+                        .ReplaceNew(externalAssemblyPath, "ExternalLib.ExternalDbContext", fakeContext))
+{
+    var service = shims.CreateObject("TargetApp.UserService");
+    var result = shims.Invoke<string>(service, "GetDisplayName", 1);
+    Assert.AreEqual("fake-1", result);
+}
+
+// 外部型をコンパイル時参照できる場合
+using (var shims = Shims.ForAssembly(targetAssemblyPath)
+                        .ReplaceNew<ExternalDbContext>(fakeContext)) { ... }
+
+// Type で指定する場合
+using (var shims = Shims.ForAssembly(targetAssemblyPath)
+                        .ReplaceNew(typeof(ExternalDbContext), fakeContext)) { ... }
+```
+
+1つの session で複数の `ReplaceNew(...)` を登録でき、internal target と external target を混在できます。
+
+```csharp
+using (var shims = Shims.ForAssembly(targetAssemblyPath)
+                        .ReplaceNew(externalAssemblyPath, "ExternalLib.ExternalDbContext", fakeDb)
+                        .ReplaceNew(externalAssemblyPath, "ExternalLib.ExternalLogger", fakeLogger)
+                        // internal target は fake が rewrite 済み load context の identity を要するため factory 形式
+                        .ReplaceNew<InternalGreeter>(s => s.CreateFake<InternalGreeter>("g")))
+{
+    var service = shims.CreateObject("TargetApp.UserService");
+    var result = shims.Invoke<string>(service, "Run", 1);
+}
+```
+
+- **rewrite 確定タイミング**: 初回 `CreateObject(...)` / `Create<T>()` / `Invoke<TResult>(...)` で確定。
+  確定後に `ReplaceNew(...)` を追加すると分かりやすい例外（`rewrite already completed` /
+  `target cannot be added after rewrite` / `create a new Shims session`）。
+- **same target type に複数回 `ReplaceNew`** した場合は **last stub wins**（既存 `ShimRuleRegistry` 準拠）。
+- **引数条件で fake を分けたい**場合は、低レベルの `New<T>().WithArguments(...).Returns(...)` を使ってください
+  （`ReplaceNew` は catch-all）。
+- **internal target**: 手作りインスタンスは rewrite 済み ALC の型 identity を持たないため差し替わりません。
+  internal は `ReplaceNew<T>(s => s.CreateFake<T>(...))`（factory 形式）を使ってください。
+- **`Create<T>()`** は load context / assembly identity 上 安全に cast できる場合のみ成功します。
+  失敗時は分かりやすい例外を出すので `CreateObject(...)` + `Invoke<TResult>(...)` を使ってください。
+- **DbContext 系**などコンストラクタ／`Dispose` に副作用がある型は、実生成に依存しない手動 fake を
+  `ReplaceNew(...)` に渡してください。
+- **BCL static method**（`DateTime.Now` / `File.ReadAllText` 等）は未対応のままです。
+- diagnostics は `shims.Diagnostics` / `shims.LastDispatchDiagnostics` / `shims.GetAlcDiagnostics()` で取得できます。
+
+> 低レベル API（`NewInterceptionHarness` / `ShimContext` / `WithExternalTarget` / `RegisterShim`）は
+> 引き続き利用可能で、以下の advanced セクションに残しています。Easy API はこれらを内部で利用しています。
 
 ### 高レベル API（`Shims` facade・Phase 17・推奨）
 
