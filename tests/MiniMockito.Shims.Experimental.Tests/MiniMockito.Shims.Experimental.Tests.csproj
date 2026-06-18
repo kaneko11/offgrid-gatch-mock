@@ -17,5 +17,7 @@
   <ItemGroup>
     <ProjectReference Include="..\..\src\MiniMockito.Shims.Experimental\MiniMockito.Shims.Experimental.csproj" />
     <ProjectReference Include="..\MiniMockito.Shims.Experimental.Sample\MiniMockito.Shims.Experimental.Sample.csproj" />
+    <ProjectReference Include="..\MiniMockito.Shims.Experimental.ExternalLib\MiniMockito.Shims.Experimental.ExternalLib.csproj" />
+    <ProjectReference Include="..\MiniMockito.Shims.Experimental.CrossAssemblySample\MiniMockito.Shims.Experimental.CrossAssemblySample.csproj" />
   </ItemGroup>
 </Project>

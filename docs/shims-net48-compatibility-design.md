@@ -998,4 +998,49 @@ dotnet test
 | 14.5 | Stabilization / Docs / NuGet準備 |
 | **15（本ドキュメント）** | **.NET Framework 4.8 / C# 7.3 compatibility 設計** |
 | **16（次フェーズ）** | **net48 MSTest テストプロジェクトの実装** |
+| 17 | high-level facade (`Shims`) |
+| 20 | cross-assembly new interception PoC |
 | 17 以降 | BCL call site rewrite 調査 / expression-based API / generic static method 等 |
+
+---
+
+## 16. Phase 20 — cross-assembly new interception の net48 対応（追記）
+
+リライト対象アセンブリ内で呼ばれる **外部アセンブリ型** の `newobj` を差し替える機能
+（`WithExternalTarget<T>()` / `RegisterShim(Type, fake)`）は、net48 でもそのまま動作します。
+
+### 16.1 net48 での型 identity 共有
+
+外部型の差し替えが成立するには、「rewritten code が期待する外部型」と「テスト側 fake の基底型」が
+同一 runtime 型である必要があります。net8 では `ShimAssemblyLoadContext` が外部 target アセンブリを
+parent ALC へ委譲して共有します。
+
+net48 には ALC がなく、rewritten assembly は `Assembly.Load(byte[])` でロードされますが、
+`RewrittenAssemblyLoader` が登録する `AppDomain.AssemblyResolve` ハンドラが
+**simple name で既ロードのアセンブリを返す**ため、外部アセンブリ（例 `ExternalLib`）は
+テストプロジェクトが既にロード済みのものが共有されます。結果として外部型 identity は一致します。
+
+| 項目 | net8 | net48 |
+|------|------|-------|
+| 外部アセンブリの共有方式 | `ShimAssemblyLoadContext.Load` が `null` を返し親 ALC に委譲 | `AppDomain.AssemblyResolve` が既ロードを simple name で返す |
+| 外部型 identity | default ALC と一致 | 既ロード assembly と一致 |
+| shim key | `Type.FullName`（+ assembly simple name）ベース | 同左 |
+
+### 16.2 net48 テスト
+
+`tests/MiniMockito.Shims.Experimental.Net48Tests/Net48CrossAssemblyTests.cs` で以下を確認:
+
+- `WithExternalTarget<T>()` / `WithExternalTarget(Type)` での外部型差し替え
+- no match 時の実コンストラクタ fallback
+- 未登録外部型は rewrite されない
+- 外部型 `CreateFake<T>()` は `NotSupportedException`
+
+テスト用アセット（`ExternalLib` / `CrossAssemblySample`）は `net48;net8.0` マルチターゲットで、
+net48 テストからは net48 ターゲットが自動選択されます。
+
+### 16.3 net48 特有の注意
+
+- 外部型は FullName ベース照合のため、同一 FullName が複数アセンブリにあると曖昧。
+- `DbContext` 系などコンストラクタ／`Dispose` に副作用がある型は、実生成に依存しない手動 fake を使う。
+- BCL static method は引き続き未対応。
+- `[assembly: DoNotParallelize]` 必須。

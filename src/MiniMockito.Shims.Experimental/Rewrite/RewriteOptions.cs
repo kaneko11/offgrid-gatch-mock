@@ -11,6 +11,13 @@ public sealed class RewriteOptions
     public IReadOnlyList<Type> TargetTypes { get; init; } = [];
 
     /// <summary>
+    /// Gets the allowed <b>external</b> target types (defined in an assembly other than the one being
+    /// rewritten) whose parameterless or argument <c>newobj</c> call sites may be rewritten.
+    /// Their cross-assembly <c>TypeReference</c> / <c>AssemblyReference</c> is preserved in the output.
+    /// </summary>
+    public IReadOnlyList<Type> ExternalTargetTypes { get; init; } = [];
+
+    /// <summary>
     /// Gets the allowed target types whose static <c>call</c> sites may be rewritten.
     /// BCL types are always excluded.
     /// </summary>
@@ -25,7 +32,9 @@ public sealed class RewriteOptions
     {
         return new NewObjScanOptions
         {
-            TargetTypes = TargetTypes,
+            TargetTypes = ExternalTargetTypes.Count == 0
+                ? TargetTypes
+                : TargetTypes.Concat(ExternalTargetTypes).ToArray(),
         };
     }
 }

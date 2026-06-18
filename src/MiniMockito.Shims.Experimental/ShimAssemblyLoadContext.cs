@@ -37,6 +37,7 @@ public sealed class ShimAssemblyLoadContext : AssemblyLoadContext
 
     private readonly AssemblyDependencyResolver _resolver;
     private readonly string? _originalDirectory;
+    private readonly HashSet<string> _sharedAssemblyNames;
 
     private readonly object _diagLock = new();
     private readonly List<string> _resolvedPaths = [];
@@ -53,9 +54,16 @@ public sealed class ShimAssemblyLoadContext : AssemblyLoadContext
     /// Used as a fallback probing path when <see cref="AssemblyDependencyResolver"/>
     /// cannot resolve a dependency (e.g. no <c>.deps.json</c> in the temp directory).
     /// </param>
+    /// <param name="sharedAssemblyNames">
+    /// Optional simple names of assemblies that must be shared from the parent (default) ALC instead
+    /// of being loaded into this isolated context.  Used for cross-assembly external <c>newobj</c>
+    /// targets so that the external type has the same runtime identity in both the rewritten code and
+    /// the registering test, allowing a fake to be substituted across the call boundary.
+    /// </param>
     public ShimAssemblyLoadContext(
         string rewrittenAssemblyPath,
-        string? originalAssemblyDirectory = null)
+        string? originalAssemblyDirectory = null,
+        IEnumerable<string>? sharedAssemblyNames = null)
         : base(
             name: $"ShimIsolated-{Path.GetFileNameWithoutExtension(rewrittenAssemblyPath)}",
             isCollectible: true)
@@ -64,6 +72,9 @@ public sealed class ShimAssemblyLoadContext : AssemblyLoadContext
         RewrittenAssemblyPath = Path.GetFullPath(rewrittenAssemblyPath);
         _originalDirectory = originalAssemblyDirectory;
         _resolver = new AssemblyDependencyResolver(RewrittenAssemblyPath);
+        _sharedAssemblyNames = sharedAssemblyNames is null
+            ? new HashSet<string>(StringComparer.OrdinalIgnoreCase)
+            : new HashSet<string>(sharedAssemblyNames, StringComparer.OrdinalIgnoreCase);
     }
 
     /// <summary>Gets the full path of the rewritten assembly this context is intended to load.</summary>
@@ -109,6 +120,15 @@ public sealed class ShimAssemblyLoadContext : AssemblyLoadContext
         {
             lock (_diagLock)
                 _parentFallbacks.Add($"{assemblyName.Name} (shim-experimental → parent ALC)");
+            return null;
+        }
+
+        // Cross-assembly external targets must be shared from the parent (default) ALC so the
+        // external type has a single runtime identity across the rewritten code and the test.
+        if (assemblyName.Name is not null && _sharedAssemblyNames.Contains(assemblyName.Name))
+        {
+            lock (_diagLock)
+                _parentFallbacks.Add($"{assemblyName.Name} (external target → parent ALC)");
             return null;
         }
 

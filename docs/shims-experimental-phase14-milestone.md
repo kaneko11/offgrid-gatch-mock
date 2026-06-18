@@ -409,3 +409,53 @@ public void Test_StaticClock_Now_IsShimmed()
 | **合計** | **214** | |
 
 全テスト PASS (Phase 14.5 時点)。
+
+---
+
+## Phase 20 — cross-assembly new interception PoC（追記）
+
+### 目標
+
+リライト対象アセンブリ内で呼ばれている **外部アセンブリ型** の `newobj` を shim に差し替える。
+これまでは「リライト対象アセンブリ自身に定義された型」の `newobj` だけが対象だった。
+
+### 追加 API
+
+| API | 内容 |
+|-----|------|
+| `NewInterceptionHarness.WithExternalTarget<TExternal>()` | 外部アセンブリ型を newobj 差し替え対象に登録 |
+| `NewInterceptionHarness.WithExternalTarget(Type)` | 同上（Type 指定版） |
+| `NewInterceptionHarness.RegisterShim(Type externalType, object fake)` | 外部型に fake を登録（非ジェネリック版） |
+| `NewInterceptionHarness.RegisterShim<TExternal>(fake)` | 外部型にも対応（FullName ベースで登録） |
+| `NewInterceptionHarness.CreateObject(string typeName)` | rewritten assembly から型名で生成 |
+| `RewriteOptions.ExternalTargetTypes` | 外部 target 型一覧 |
+| `ShimDispatchDiagnostics.ResolvedByFullNameFallback` / `DuplicateFullNameRisk` | 外部型ルックアップ診断 |
+
+### 方式
+
+- **rewrite**: 外部型 `newobj` も内部型と同じく `ShimDispatcher.New<T>()` 経由に置換。
+  外部型の `TypeReference` / `AssemblyReference` は `module.ImportReference` でそのまま維持され、
+  rewritten assembly は外部アセンブリを引き続き参照する（外部アセンブリ自体は書き換えない）。
+- **型 identity の共有**: 外部 target アセンブリは isolated ALC ではなく parent (default) ALC から
+  共有する（net8: `ShimAssemblyLoadContext.Load` が `null` を返して親へ委譲、net48:
+  `AppDomain.AssemblyResolve` が既ロードを返す）。これにより、テスト側 fake と rewritten code の
+  期待型が一致する。
+- **shim key**: 外部型は `Type.FullName`（+ assembly simple name）ベースで照合する。
+  完全な runtime `Type` 一致に依存しない。
+- **CreateFake<T>()**: 外部型は未対応。`NotSupportedException` を投げ、手動 fake + `RegisterShim` を案内。
+
+### 追加テスト
+
+- `tests/MiniMockito.Shims.Experimental.Tests/CrossAssemblyNewObjTests.cs`（net8, 9 件）
+- `tests/MiniMockito.Shims.Experimental.Net48Tests/Net48CrossAssemblyTests.cs`（net48, 5 件）
+- テスト用アセット: `tests/MiniMockito.Shims.Experimental.ExternalLib`（`ExternalLib.ExternalDbContext` /
+  `ExternalLib.ExternalOtherContext`）、`tests/MiniMockito.Shims.Experimental.CrossAssemblySample`
+  （`CrossAssemblySample.CrossAssemblyUserService`）。いずれも `net48;net8.0` マルチターゲット。
+
+### 制約
+
+- 外部型は FullName ベース照合のため、同一 FullName の型が複数アセンブリにあると曖昧（`DuplicateFullNameRisk`）。
+- 外部型に `CreateFake<T>()` は使えない（手動 fake が第一推奨）。
+- `DbContext` 系などコンストラクタ／`Dispose` に副作用がある型は、実生成に依存しない fake を用意する。
+- BCL static method は引き続き未対応。
+- `[assembly: DoNotParallelize]` 必須。

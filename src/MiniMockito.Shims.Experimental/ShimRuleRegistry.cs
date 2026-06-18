@@ -9,11 +9,13 @@
 public sealed class ShimRuleRegistry
 {
     private readonly Dictionary<Type, List<NewShimRule>> _newRules = [];
+    private readonly Dictionary<string, List<NewShimRule>> _newRulesByName = new(StringComparer.Ordinal);
     private readonly object _syncRoot = new();
     private long _nextRegistrationOrder;
 
     /// <summary>
-    /// Gets the total number of registered new-shim rules across all target types.
+    /// Gets the total number of registered new-shim rules across all target types,
+    /// including both runtime-<see cref="Type"/>-keyed (internal) and FullName-keyed (external) rules.
     /// </summary>
     public int Count
     {
@@ -23,6 +25,8 @@ public sealed class ShimRuleRegistry
             {
                 var total = 0;
                 foreach (var list in _newRules.Values)
+                    total += list.Count;
+                foreach (var list in _newRulesByName.Values)
                     total += list.Count;
                 return total;
             }
@@ -101,6 +105,39 @@ public sealed class ShimRuleRegistry
     }
 
     /// <summary>
+    /// Registers a parameterless replacement factory for an <b>external</b> (cross-assembly) target,
+    /// keyed by <paramref name="typeFullName"/> rather than by runtime <see cref="Type"/> identity.
+    /// This allows the rule to be found even when the <c>newobj</c> call site resolves the type
+    /// through a different load context than the one that registered the shim.
+    /// </summary>
+    /// <param name="typeFullName">The external type's <see cref="Type.FullName"/> (the primary key).</param>
+    /// <param name="assemblySimpleName">The simple name of the assembly that defines the external type.</param>
+    /// <param name="originalType">The external type as seen by the registering load context.</param>
+    /// <param name="factory">The replacement factory.</param>
+    /// <param name="contextId">The owning context id.</param>
+    /// <param name="matchers">Optional argument matchers; <see langword="null"/> means catch-all.</param>
+    internal NewShimRule RegisterNewRuleByName(
+        string typeFullName,
+        string assemblySimpleName,
+        Type originalType,
+        Func<object?> factory,
+        Guid contextId,
+        IReadOnlyList<IShimArgumentMatcher>? matchers)
+    {
+        ThrowHelper.ThrowIfNullOrWhiteSpace(typeFullName);
+        ThrowHelper.ThrowIfNull(originalType);
+        ThrowHelper.ThrowIfNull(factory);
+
+        lock (_syncRoot)
+        {
+            var rule = new NewShimRule(
+                originalType, factory, contextId, ++_nextRegistrationOrder, matchers, assemblySimpleName);
+            GetOrCreateNameList(typeFullName).Add(rule);
+            return rule;
+        }
+    }
+
+    /// <summary>
     /// Attempts to find the most recently registered rule for a target type, regardless of
     /// argument matchers.  This is a backward-compatible lookup used when no argument context
     /// is available (e.g. existence checks in tests).
@@ -111,14 +148,22 @@ public sealed class ShimRuleRegistry
 
         lock (_syncRoot)
         {
-            if (!_newRules.TryGetValue(targetType, out var list) || list.Count == 0)
+            if (_newRules.TryGetValue(targetType, out var list) && list.Count > 0)
             {
-                rule = null;
-                return false;
+                rule = list[list.Count - 1];
+                return true;
             }
 
-            rule = list[list.Count - 1];
-            return true;
+            // External (FullName-keyed) fallback.
+            var fullName = targetType.FullName;
+            if (fullName is not null && _newRulesByName.TryGetValue(fullName, out var nameList) && nameList.Count > 0)
+            {
+                rule = nameList[nameList.Count - 1];
+                return true;
+            }
+
+            rule = null;
+            return false;
         }
     }
 
@@ -139,18 +184,29 @@ public sealed class ShimRuleRegistry
 
         lock (_syncRoot)
         {
-            if (!_newRules.TryGetValue(targetType, out var list))
+            if (_newRules.TryGetValue(targetType, out var list))
             {
-                rule = null;
-                return false;
+                for (int i = list.Count - 1; i >= 0; i--)
+                {
+                    if (list[i].MatchesArgs(args))
+                    {
+                        rule = list[i];
+                        return true;
+                    }
+                }
             }
 
-            for (int i = list.Count - 1; i >= 0; i--)
+            // External (FullName-keyed) fallback.
+            var fullName = targetType.FullName;
+            if (fullName is not null && _newRulesByName.TryGetValue(fullName, out var nameList))
             {
-                if (list[i].MatchesArgs(args))
+                for (int i = nameList.Count - 1; i >= 0; i--)
                 {
-                    rule = list[i];
-                    return true;
+                    if (nameList[i].MatchesArgs(args))
+                    {
+                        rule = nameList[i];
+                        return true;
+                    }
                 }
             }
 
@@ -175,74 +231,122 @@ public sealed class ShimRuleRegistry
 
         lock (_syncRoot)
         {
-            if (!_newRules.TryGetValue(targetType, out var list) || list.Count == 0)
-            {
-                rule = null;
-                diagnostics = new ShimDispatchDiagnostics(targetType, args, [], matchFound: false);
-                return false;
-            }
-
             var tried = new List<ShimDispatchDiagnostics.TriedRuleInfo>();
 
-            for (int i = list.Count - 1; i >= 0; i--)
+            // 1. Exact runtime-Type match (internal targets).
+            if (_newRules.TryGetValue(targetType, out var typeList) && typeList.Count > 0
+                && TryMatchInList(typeList, args, tried, out var typeRule))
             {
-                var r = list[i];
-                var matchers = r.ArgumentMatchers;
-                bool ruleMatched;
-                string mismatchReason;
-                List<string> descriptions;
+                rule = typeRule;
+                diagnostics = new ShimDispatchDiagnostics(targetType, args, tried.AsReadOnly(), matchFound: true);
+                return true;
+            }
 
-                if (matchers is null)
-                {
-                    ruleMatched = true;
-                    mismatchReason = string.Empty;
-                    descriptions = [];
-                }
-                else if (args.Length != matchers.Count)
-                {
-                    ruleMatched = false;
-                    mismatchReason = $"Expected {matchers.Count} argument(s), got {args.Length}";
-                    descriptions = matchers.Select(m => m.Describe()).ToList();
-                }
-                else
-                {
-                    ruleMatched = true;
-                    mismatchReason = string.Empty;
-                    descriptions = [];
-                    for (int j = 0; j < args.Length; j++)
-                    {
-                        var desc = matchers[j].Describe();
-                        descriptions.Add(desc);
-                        if (!matchers[j].Matches(args[j]))
-                        {
-                            ruleMatched = false;
-                            var valStr = args[j] is string sv ? $"\"{sv}\"" : (args[j]?.ToString() ?? "null");
-                            mismatchReason = $"Matcher [{j}] ({desc}) did not match actual value: {valStr}";
-                            for (int k = j + 1; k < matchers.Count; k++)
-                                descriptions.Add(matchers[k].Describe());
-                            break;
-                        }
-                    }
-                }
-
-                tried.Add(new ShimDispatchDiagnostics.TriedRuleInfo(
-                    r.RegistrationOrder,
-                    descriptions.AsReadOnly(),
-                    ruleMatched,
-                    mismatchReason));
-
-                if (ruleMatched)
-                {
-                    rule = r;
-                    diagnostics = new ShimDispatchDiagnostics(targetType, args, tried.AsReadOnly(), matchFound: true);
-                    return true;
-                }
+            // 2. FullName fallback (external / cross-assembly targets).
+            var fullName = targetType.FullName;
+            if (fullName is not null && _newRulesByName.TryGetValue(fullName, out var nameList) && nameList.Count > 0
+                && TryMatchInList(nameList, args, tried, out var nameRule))
+            {
+                rule = nameRule;
+                diagnostics = new ShimDispatchDiagnostics(
+                    targetType,
+                    args,
+                    tried.AsReadOnly(),
+                    matchFound: true,
+                    resolvedByFullNameFallback: true,
+                    duplicateFullNameRisk: HasDuplicateAssemblyRisk(nameList));
+                return true;
             }
 
             rule = null;
             diagnostics = new ShimDispatchDiagnostics(targetType, args, tried.AsReadOnly(), matchFound: false);
             return false;
         }
+    }
+
+    /// <summary>
+    /// Evaluates the rules in <paramref name="list"/> from most recently registered to least,
+    /// appending each evaluation to <paramref name="tried"/> and returning the first match.
+    /// </summary>
+    private static bool TryMatchInList(
+        List<NewShimRule> list,
+        object?[] args,
+        List<ShimDispatchDiagnostics.TriedRuleInfo> tried,
+        out NewShimRule? matched)
+    {
+        for (int i = list.Count - 1; i >= 0; i--)
+        {
+            var r = list[i];
+            var matchers = r.ArgumentMatchers;
+            bool ruleMatched;
+            string mismatchReason;
+            List<string> descriptions;
+
+            if (matchers is null)
+            {
+                ruleMatched = true;
+                mismatchReason = string.Empty;
+                descriptions = [];
+            }
+            else if (args.Length != matchers.Count)
+            {
+                ruleMatched = false;
+                mismatchReason = $"Expected {matchers.Count} argument(s), got {args.Length}";
+                descriptions = matchers.Select(m => m.Describe()).ToList();
+            }
+            else
+            {
+                ruleMatched = true;
+                mismatchReason = string.Empty;
+                descriptions = [];
+                for (int j = 0; j < args.Length; j++)
+                {
+                    var desc = matchers[j].Describe();
+                    descriptions.Add(desc);
+                    if (!matchers[j].Matches(args[j]))
+                    {
+                        ruleMatched = false;
+                        var valStr = args[j] is string sv ? $"\"{sv}\"" : (args[j]?.ToString() ?? "null");
+                        mismatchReason = $"Matcher [{j}] ({desc}) did not match actual value: {valStr}";
+                        for (int k = j + 1; k < matchers.Count; k++)
+                            descriptions.Add(matchers[k].Describe());
+                        break;
+                    }
+                }
+            }
+
+            tried.Add(new ShimDispatchDiagnostics.TriedRuleInfo(
+                r.RegistrationOrder,
+                descriptions.AsReadOnly(),
+                ruleMatched,
+                mismatchReason));
+
+            if (ruleMatched)
+            {
+                matched = r;
+                return true;
+            }
+        }
+
+        matched = null;
+        return false;
+    }
+
+    private static bool HasDuplicateAssemblyRisk(List<NewShimRule> nameList)
+    {
+        string? first = null;
+        foreach (var r in nameList)
+        {
+            var name = r.ExternalAssemblySimpleName;
+            if (name is null)
+                continue;
+            if (first is null)
+                first = name;
+            else if (!string.Equals(first, name, StringComparison.Ordinal))
+                return true;
+        }
+
+        return false;
     }
 
     /// <summary>
@@ -253,6 +357,7 @@ public sealed class ShimRuleRegistry
         lock (_syncRoot)
         {
             _newRules.Clear();
+            _newRulesByName.Clear();
         }
     }
 
@@ -262,6 +367,17 @@ public sealed class ShimRuleRegistry
         {
             list = [];
             _newRules[targetType] = list;
+        }
+
+        return list;
+    }
+
+    private List<NewShimRule> GetOrCreateNameList(string typeFullName)
+    {
+        if (!_newRulesByName.TryGetValue(typeFullName, out var list))
+        {
+            list = [];
+            _newRulesByName[typeFullName] = list;
         }
 
         return list;
