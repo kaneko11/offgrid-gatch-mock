@@ -38,6 +38,7 @@
 | 外部型を assembly path + type full name の文字列で指定（コンパイル時参照不要） | ✅ 対応 (Phase 21) |
 | cross-assembly diagnostics（解決/登録/rewrite/skip/registry key/duplicate risk） | ✅ 対応 (Phase 21) |
 | Easy API `Shims.ForAssembly(...).ReplaceNew(...)`（複数登録 / internal・external 混在 / last stub wins） | ✅ 対応 (Phase 23) |
+| Inspection API（`GetValue<T>` / `GetCollection` / `ShimsObject` で rewritten object graph を path 検証） | ✅ 対応 (Phase 24) |
 | ShimContext.Dispose() で確実に cleanup | ✅ 対応 |
 
 ---
@@ -208,6 +209,51 @@ using (var shims = Shims.ForAssembly(targetAssemblyPath)
 - **`ShimContext` は不要**: session 内部で生成・破棄されます。`Dispose()`（= `using` 終了）で
   `ShimContext` / `NewInterceptionHarness` / rewritten assembly loader が cleanup されます。
 - **diagnostics**: `shims.Diagnostics` / `shims.LastDispatchDiagnostics` / `shims.GetAlcDiagnostics()`。
+
+### 6.0c Inspection API（Phase 24・object graph の検証）
+
+`ForAssembly(...).ReplaceNew(...)` は target assembly を rewrite して別ロードするため、**rewritten
+object の型 identity はテスト側の元の型と一致しない**ことがあります（`Create<T>()` で strongly typed に
+戻せない、`ObservableCollection<T>` の `T` が rewritten type になる等）。この Phase の inspection API は、
+**rewritten object を `object` のまま path で観察・検証**します（元の型へ無理に cast しません）。
+
+```csharp
+using (var shims = Shims.ForAssembly(targetAssemblyPath)
+                        .ReplaceNew(externalAssemblyPath, "ExternalLib.ExternalDbContext", fakeContext))
+{
+    var vm = shims.CreateObject("TargetApp.UserViewModel");
+    shims.Invoke(vm, "Load");
+
+    var count = shims.GetValue<int>(vm, "Items.Count");
+    var firstName = shims.GetValue<string>(vm, "Items[0].Name");
+
+    var items = shims.GetCollection(vm, "Items");
+    Assert.AreEqual("fake-1", items[0].Get<string>("Name"));
+
+    var name = shims.Inspect(vm).GetObject("SelectedUser").GetValue<string>("Name");
+}
+```
+
+API:
+
+| メソッド | 内容 |
+|---------|------|
+| `GetValue(object, path)` / `GetValue<T>(object, path)` | path 評価 + （型付き時）変換 |
+| `GetProperty(object, name)` / `GetProperty<T>(object, name)` | 単一プロパティ/フィールド読み取り |
+| `Inspect(object)` → `ShimsObject` | wrapper（`GetValue` / `Get<T>` / `GetObject` / `GetCollection`） |
+| `GetCollection(object, path)` → `ShimsCollection` | `Count` / `this[int]` / `GetRawItem` / `ToList` / `IEnumerable<ShimsObject>` |
+
+- **path 構文**: `Items`, `Items.Count`, `SelectedUser.Name`, `Items[0]`, `Items[0].Name`, `Rows[1].Cells[2].Text`。
+- **Count**: public `Count` / `ICollection.Count` / `ICollection<T>.Count` / `IReadOnlyCollection<T>.Count` /
+  最後の手段として `IEnumerable` の列挙数。
+- **`GetValue<T>`**: assignable ならそのまま、primitive / enum / string / `decimal` / `DateTime` / nullable は
+  `Convert.ChangeType` 等で変換、`T==object` は raw を返す。**rewritten 参照型を同名 original 型へ強制 cast しません**。
+- **collection 対応**: array / `IList` / `IReadOnlyList<T>` / `ICollection<T>` / `ObservableCollection<T>`。
+  `ObservableCollection<T>` は BCL collection として扱い、要素 `T` が rewritten type でも wrapper で検証できます。
+- **例外**: path 途中 null・存在しないプロパティ・index 範囲外・変換不可は `ShimsInspectionException`
+  （requested path / failed segment / runtime type / reason、識別不一致時は「different load context」ヒント）。
+- **`Create<T>()` との関係**: 型 identity が一致する場合のみ使用。cross-assembly / rewritten シナリオでは
+  `CreateObject(...)` + `Invoke(...)` + inspection API を基本にします。
 
 ---
 

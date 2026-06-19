@@ -1136,3 +1136,63 @@ public sealed class Net48EasyApiSample
 - rewrite 確定後の `ReplaceNew(...)` は分かりやすい例外。
 - BCL static method は未対応。external assembly 自体は rewrite しない。
 - `[assembly: DoNotParallelize]` 必須。
+
+---
+
+## 19. Phase 24 — inspection API の net48 対応（追記）
+
+rewritten object graph を `object` のまま検証する inspection API（`GetValue<T>` / `GetCollection` /
+`Inspect` / `ShimsObject` / `ShimsCollection`）は net48 でもそのまま動作します（純粋な reflection helper で
+ALC 固有機能に依存しません）。C# 7.3 では `using var` を使わず `using (...) { }` を使います。
+
+### 19.1 net48 / C# 7.3 sample（using statement 形式）
+
+```csharp
+using System;
+using System.IO;
+using ExternalLib;
+using Microsoft.VisualStudio.TestTools.UnitTesting;
+using MiniMockito.Shims.Experimental;
+
+[TestClass]
+[DoNotParallelize]
+public sealed class Net48InspectionSample
+{
+    private sealed class FakeExternalDbContext : ExternalDbContext
+    {
+        public override string GetName(int id) { return "fake-" + id; }
+    }
+
+    [TestMethod]
+    public void Inspect_RewrittenObjectGraph_OnNet48()
+    {
+        string targetAssemblyPath = typeof(CrossAssemblySample.UserViewModel).Assembly.Location;
+        string externalAssemblyPath = Path.Combine(AppDomain.CurrentDomain.BaseDirectory, "ExternalLib.dll");
+
+        using (Shims shims = Shims.ForAssembly(targetAssemblyPath)
+            .ReplaceNew(externalAssemblyPath, "ExternalLib.ExternalDbContext", new FakeExternalDbContext()))
+        {
+            object vm = shims.CreateObject("CrossAssemblySample.UserViewModel");
+            shims.Invoke(vm, "Load");
+
+            int count = shims.GetValue<int>(vm, "Items.Count");
+            string firstName = shims.GetValue<string>(vm, "Items[0].Name");
+
+            ShimsCollection items = shims.GetCollection(vm, "Items");
+
+            Assert.AreEqual(1, count);
+            Assert.AreEqual("fake-1", firstName);
+            Assert.AreEqual("fake-1", items[0].Get<string>("Name"));
+        }
+    }
+}
+```
+
+### 19.2 net48 特有の注意（Phase 24）
+
+- rewritten 参照型を元の型へ無理に cast しない（不一致時は `ShimsInspectionException`）。
+  ViewModel / DTO / collection は inspection API で検証する。
+- `ObservableCollection<T>` の `T` が rewritten type でも wrapper（`ShimsObject`）で検証できる。
+- `Create<T>()` が安全でない場合は `CreateObject(...)` + `Invoke(...)` + inspection API を使う。
+- BCL static method は未対応。external assembly 自体は rewrite しない。
+- `[assembly: DoNotParallelize]` 必須。
