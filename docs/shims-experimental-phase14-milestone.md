@@ -636,3 +636,68 @@ high-level facade（Easy API）を追加する。
 ### 対象外（Phase 22）
 
 - nuget.org への push、API key の保存、GitHub release 作成、新機能追加、破壊的変更。
+
+---
+
+## Phase 24 — rewritten object inspection API（追記）
+
+### 目標
+
+新しい interception 機能は追加せず、`ForAssembly(...).ReplaceNew(...)` で rewrite された object graph を、
+**型 identity mismatch を無理に解消せず** `object` のまま安全に検証できる inspection / reflection helper を追加する。
+
+### 追加 inspection API
+
+`Shims` facade:
+
+| API | 内容 |
+|-----|------|
+| `GetValue(object, string path)` / `GetValue<T>(object, string path)` | path 評価 +（型付き時）変換 |
+| `GetProperty(object, string name)` / `GetProperty<T>(object, string name)` | 単一プロパティ/フィールド読み取り |
+| `Inspect(object)` → `ShimsObject` | object wrapper |
+| `GetCollection(object, string path)` → `ShimsCollection` | collection wrapper |
+
+wrapper / helper:
+
+- `ShimsObject`（`Instance` / `GetValue` / `GetValue<T>` / `Get<T>` / `GetProperty(<T>)` / `GetObject` / `GetCollection`）
+- `ShimsCollection : IEnumerable<ShimsObject>`（`Instance` / `Count` / `this[int]` / `GetRawItem` / `ToList`）
+- internal: `ShimsPathEvaluator` / `ShimsReflectionAccessor`、例外 `ShimsInspectionException`
+
+### path syntax の対応範囲
+
+- property / field: `Items`, `Items.Count`, `SelectedUser.Name`
+- indexer: `Items[0]`, `Items[0].Name`, `Rows[1].Cells[2].Text`
+- `Count`: public `Count` / `ICollection.Count` / `ICollection<T>.Count` / `IReadOnlyCollection<T>.Count` /
+  最終手段として `IEnumerable` 列挙数
+- path 途中 null / 存在しないプロパティ / index 範囲外 / malformed は `ShimsInspectionException`
+  （requested path / failed segment / runtime type / reason を含む）
+
+### collection / ObservableCollection 対応
+
+- `IEnumerable` / `IList` / array / `IReadOnlyList<T>` / `ICollection` / `ICollection<T>` / `ObservableCollection<T>`
+- `ObservableCollection<T>` は BCL collection として扱い、要素 `T` が rewritten type でも wrapper で検証可能
+
+### 型 identity mismatch への扱い
+
+- `GetValue<T>` は assignable ならそのまま、primitive / enum / string / value 型は変換、`T==object` は raw を返す。
+- **rewritten 参照型を同名 original 型へ強制 cast しない**。変換不可時は `ShimsInspectionException` に
+  「rewritten object may belong to a different load context / use object or inspection API /
+  use GetValue<T> for primitive properties」を案内。
+
+### Create<T>() との関係
+
+- 本 Phase で `Create<T>()` の identity 問題は解消しない。安全でない場合は従来どおり例外。
+- cross-assembly / rewritten シナリオは `CreateObject(...)` + `Invoke(...)` + inspection API を基本にする。
+
+### 追加テスト
+
+- `tests/MiniMockito.Shims.Experimental.Tests/InspectionApiTests.cs`（net8, 12 件）
+- `tests/MiniMockito.Shims.Experimental.Net48Tests/Net48InspectionApiTests.cs`（net48, 5 件）
+- テスト用 sample: `CrossAssemblySample.UserViewModel` / `UserItem`（`ObservableCollection<UserItem> Items`、
+  fake external db から `Items` / `SelectedUser` を構築する `Load` / `LoadMany`）。
+
+### 対象外（Phase 24）
+
+- 型 identity mismatch の根本解決、rewritten→original の自動変換、BCL static method mocking、
+  external assembly 自体の rewrite、production in-place rewrite、WPF binding 完全統合、
+  expression-based property path API。

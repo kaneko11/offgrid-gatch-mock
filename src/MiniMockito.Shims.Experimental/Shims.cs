@@ -400,6 +400,44 @@ public sealed class Shims : IDisposable
     }
 
     /// <summary>
+    /// Phase 24 inspection: wraps <paramref name="instance"/> in a <see cref="ShimsObject"/> so its
+    /// (possibly rewritten) object graph can be observed by property path without casting it to the
+    /// test's original type.
+    /// </summary>
+    public ShimsObject Inspect(object instance)
+    {
+        ThrowIfDisposed();
+        return new ShimsObject(instance);
+    }
+
+    /// <summary>
+    /// Phase 24 inspection: evaluates <paramref name="path"/> on <paramref name="instance"/> and
+    /// returns the raw value (may be null at the leaf).  Supports property/field access and integer
+    /// indexers, e.g. <c>"Items.Count"</c>, <c>"Items[0].Name"</c>, <c>"SelectedUser.Name"</c>.
+    /// </summary>
+    public object GetValue(object instance, string path) => Inspect(instance).GetValue(path);
+
+    /// <summary>
+    /// Phase 24 inspection: evaluates <paramref name="path"/> and converts the value to
+    /// <typeparamref name="T"/>.  Use this for primitive / string / enum / value-type leaves;
+    /// rewritten reference types are never force-cast to a same-named original type.
+    /// </summary>
+    public T GetValue<T>(object instance, string path) => Inspect(instance).GetValue<T>(path);
+
+    /// <summary>Phase 24 inspection: reads a single public property or field by name.</summary>
+    public object GetProperty(object instance, string propertyName) => Inspect(instance).GetProperty(propertyName);
+
+    /// <summary>Phase 24 inspection: reads a single public property or field and converts it to <typeparamref name="T"/>.</summary>
+    public T GetProperty<T>(object instance, string propertyName) => Inspect(instance).GetProperty<T>(propertyName);
+
+    /// <summary>
+    /// Phase 24 inspection: evaluates <paramref name="path"/> and returns the collection as a
+    /// <see cref="ShimsCollection"/> whose elements are exposed as <see cref="ShimsObject"/> wrappers.
+    /// Works even when the element type is a rewritten type (e.g. <c>ObservableCollection&lt;T&gt;</c>).
+    /// </summary>
+    public ShimsCollection GetCollection(object instance, string path) => Inspect(instance).GetCollection(path);
+
+    /// <summary>
     /// Returns a diagnostics snapshot of the isolated load context.
     /// </summary>
     public ShimAlcDiagnostics GetAlcDiagnostics()

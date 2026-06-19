@@ -71,9 +71,10 @@ public sealed class CrossAssemblyNewObjTests
 
         var result = harness.LastRewriteResult!;
 
-        // ExternalDbContext is constructed in CrossAssemblyUserService.GetDisplayName and .Run.
-        Assert.AreEqual(2, result.RewrittenCallSiteCount,
-            "Both ExternalDbContext newobj call sites should be rewritten.");
+        // ExternalDbContext is constructed in CrossAssemblyUserService.GetDisplayName and .Run,
+        // and in UserViewModel.Load and .LoadMany (Phase 24 sample) — four call sites total.
+        Assert.AreEqual(4, result.RewrittenCallSiteCount,
+            "All ExternalDbContext newobj call sites should be rewritten.");
         Assert.IsTrue(
             result.Diagnostics.Any(d => d.StartsWith("External newobj detected", StringComparison.Ordinal)),
             "Expected an 'External newobj detected' diagnostic.");

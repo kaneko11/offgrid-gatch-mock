@@ -82,8 +82,8 @@ src/
 
 tests/
   MiniMockito.Tests/                              ← v2 テスト (77件)
-  MiniMockito.Shims.Experimental.Tests/          ← Shims テスト (284件)
-  MiniMockito.Shims.Experimental.Net48Tests/     ← Shims net48 テスト (53件)
+  MiniMockito.Shims.Experimental.Tests/          ← Shims テスト (296件)
+  MiniMockito.Shims.Experimental.Net48Tests/     ← Shims net48 テスト (58件)
   MiniMockito.Shims.Experimental.Sample/         ← Shims テスト用サンプルアセンブリ
   MiniMockito.Shims.Experimental.ExternalLib/    ← cross-assembly 用サンプル外部アセンブリ (Phase 20)
   MiniMockito.Shims.Experimental.CrossAssemblySample/ ← cross-assembly 用サンプル TargetApp (Phase 20)
@@ -98,11 +98,11 @@ samples/
 | アセンブリ | フレームワーク | 合格 | 失敗 |
 |-----------|--------------|------|------|
 | MiniMockito.Tests | net8.0 | 77 | 0 |
-| MiniMockito.Shims.Experimental.Tests | net8.0 | 284 | 0 |
-| MiniMockito.Shims.Experimental.Net48Tests | net48 | 53 | 0 |
+| MiniMockito.Shims.Experimental.Tests | net8.0 | 296 | 0 |
+| MiniMockito.Shims.Experimental.Net48Tests | net48 | 58 | 0 |
 | MiniMockito.Net48X86Tests | net48 | 26 | 0 |
 | MiniMockito.Sample.MSTest | net8.0 | 6 | 0 |
-| **合計** | | **446** | **0** |
+| **合計** | | **463** | **0** |
 
 ---
 
@@ -557,6 +557,44 @@ using (var shims = Shims.ForAssembly(targetAssemblyPath)
   `ReplaceNew(...)` に渡してください。
 - **BCL static method**（`DateTime.Now` / `File.ReadAllText` 等）は未対応のままです。
 - diagnostics は `shims.Diagnostics` / `shims.LastDispatchDiagnostics` / `shims.GetAlcDiagnostics()` で取得できます。
+
+#### 結果の検証（Inspection API・Phase 24）
+
+`ForAssembly(...).ReplaceNew(...)` は target assembly を rewrite して別ロードするため、戻り値や
+object graph の型 identity がテスト側の元の型と一致しないことがあります（`ObservableCollection<T>` の
+`T` が rewritten type になる等）。**rewritten object を元の型へ無理に cast せず**、inspection API
+（`object` のまま path で観察）で検証してください。
+
+```csharp
+using (var shims = Shims.ForAssembly(targetAssemblyPath)
+                        .ReplaceNew(externalAssemblyPath, "ExternalLib.ExternalDbContext", fakeContext))
+{
+    var vm = shims.CreateObject("TargetApp.UserViewModel");
+    shims.Invoke(vm, "Load");
+
+    // path 指定でスカラー値を取得（プロパティ / ネスト / indexer / Count）
+    var count = shims.GetValue<int>(vm, "Items.Count");
+    var firstName = shims.GetValue<string>(vm, "Items[0].Name");
+
+    // collection は wrapper として検証（要素型が rewritten type でも OK）
+    var items = shims.GetCollection(vm, "Items");
+    Assert.AreEqual(1, items.Count);
+    Assert.AreEqual("fake-1", items[0].Get<string>("Name"));
+
+    // ShimsObject 経由のネスト / collection アクセス
+    var name = shims.Inspect(vm).GetObject("SelectedUser").GetValue<string>("Name");
+}
+```
+
+- **path 構文**: `Items`, `Items.Count`, `SelectedUser.Name`, `Items[0]`, `Items[0].Name`, `Rows[1].Cells[2].Text`。
+- **`GetValue<T>`**: primitive / string / enum / value 型へ変換。`GetValue<object>` は raw を返す。
+  rewritten 参照型を同名 original 型へ強制 cast はしません（不一致時は識別ヒント付き `ShimsInspectionException`）。
+- **`GetCollection`**: array / `IList` / `IReadOnlyList<T>` / `ICollection<T>` / `ObservableCollection<T>` に対応。
+- **例外**: path 途中の null・存在しないプロパティ・index 範囲外は `ShimsInspectionException`（requested path /
+  failed segment / runtime type / reason を含む）。
+- **DbContext 系**: 手動 fake を `ReplaceNew(...)` に渡し、結果（Items / ViewModel など）は inspection API で検証します。
+- **`Create<T>()` との関係**: 型 identity が一致する場合のみ使用。cross-assembly / rewritten シナリオでは
+  `CreateObject(...)` + `Invoke(...)` + inspection API を基本にしてください。
 
 > 低レベル API（`NewInterceptionHarness` / `ShimContext` / `WithExternalTarget` / `RegisterShim`）は
 > 引き続き利用可能で、以下の advanced セクションに残しています。Easy API はこれらを内部で利用しています。
