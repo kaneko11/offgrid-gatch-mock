@@ -606,14 +606,19 @@ high-level facade（Easy API）を追加する。
 | パッケージ | 旧 | 新 |
 |-----------|----|----|
 | `MiniMockito.Net` | 0.2.0-preview.6 | **0.2.0-preview.7** |
-| `MiniMockito.Shims.Experimental` | 0.1.0-alpha.4 | **0.1.0-alpha.5** |
+| `MiniMockito.Shims.Experimental` | 0.1.0-alpha.4 | **0.1.0-alpha.6** |
+
+> Phase 22 は 2 回実施しています。1 回目で `0.1.0-alpha.5`（Phase 20 / 21 / 23 まで）を検証し、
+> Phase 24（inspection API）追加後の 2 回目で **`0.1.0-alpha.6`**（Phase 20 / 21 / 23 / 24 を含む alpha）を
+> 検証しました。`MiniMockito.Net` は Phase 20〜24 で変更がないため `0.2.0-preview.7` を維持します。
 
 ### csproj metadata
 
 - `MiniMockito.Net`: `Version` のみ更新（PackageId / Authors / Description / PackageTags /
   RepositoryUrl / PackageLicenseExpression / GenerateDocumentationFile は確認のみ・変更なし）。
-- `MiniMockito.Shims.Experimental`: `Version` 更新 + `Description` を Phase 20/21/23
-  （cross-assembly new interception + Easy API `ReplaceNew`）反映に更新し、experimental / test-only /
+- `MiniMockito.Shims.Experimental`: `Version` 更新 + `Description` を Phase 20/21/23/24
+  （cross-assembly new interception + Easy API `ReplaceNew` + inspection API
+  `GetValue<T>`/`GetCollection`/`ShimsObject`）反映に更新し、experimental / test-only /
   API may change / `[DoNotParallelize]` 必須 / BCL static 未対応 / production in-place rewrite はしない
   を明記。
 

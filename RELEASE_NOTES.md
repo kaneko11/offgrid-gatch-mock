@@ -22,6 +22,22 @@
 
 > **⚠️ EXPERIMENTAL / TEST-ONLY。API は予告なく変更されます。production への組み込み不可。**
 
+### 0.1.0-alpha.6
+
+- Phase 20 / 21 / 23 / 24 の成果をまとめた alpha。
+- rewritten object inspection API（Phase 24）を追加:
+  - `Shims.GetValue(object, path)` / `GetValue<T>(...)` / `GetProperty(<T>)(...)` / `Inspect(...)` / `GetCollection(...)`
+  - wrapper: `ShimsObject`（`GetValue` / `Get<T>` / `GetObject` / `GetCollection`）、
+    `ShimsCollection : IEnumerable<ShimsObject>`（`Count` / `this[int]` / `GetRawItem` / `ToList`）
+  - property path（`Items.Count` / `Items[0].Name` / `SelectedUser.Name`）で rewritten object graph を
+    `object` のまま検証。`ObservableCollection<T>` の要素 `T` が rewritten type でも検証可能。
+  - rewritten 参照型を同名 original 型へ強制 cast しない。不一致時は `ShimsInspectionException`。
+- public API の破壊的変更なし（追加のみ）。
+- 含まれる既存成果: cross-assembly new interception（Phase 20 / 21）、Easy Shims API
+  `Shims.ForAssembly(path).ReplaceNew(...)`（Phase 23）。下記 alpha.5 の項目を参照。
+
+対象フレームワーク: `net8.0`, `net48`。XML ドキュメント・シンボル（snupkg）同梱。依存: `Mono.Cecil`。
+
 ### 0.1.0-alpha.5
 
 - cross-assembly new interception（Phase 20 / 21）:
