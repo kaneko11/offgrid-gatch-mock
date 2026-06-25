@@ -510,8 +510,31 @@ public class TimedService
 cross-assembly の `new` 差し替えは、`Shims.ForAssembly(...)` + `ReplaceNew(...)` で短く書けます。
 `NewInterceptionHarness` / `ShimContext` / `WithExternalTarget` / `RegisterShim` を直接書く必要はありません。
 
+**対象コード（テスト対象の製品コード。これは変更しない）** — `UserService` 内の
+`new ExternalDbContext()` が差し替え対象です:
+
+```csharp
+// 書き換え対象アセンブリ TargetApp：メソッド内で別アセンブリの型を直接 new している
+namespace TargetApp
+{
+    public class UserService
+    {
+        public string GetDisplayName(int id)
+        {
+            using (var ctx = new ExternalLib.ExternalDbContext())   // ← この new を fake に差し替える
+            {
+                return ctx.FindName(id);
+            }
+        }
+    }
+}
+```
+
+**テストコード（上の `new` を差し替える）**:
+
 ```csharp
 // 外部型を assembly path + type full name で指定（コンパイル時参照不要）
+// fakeContext は自分で用意した ExternalDbContext の代用インスタンス
 using (var shims = Shims.ForAssembly(targetAssemblyPath)
                         .ReplaceNew(externalAssemblyPath, "ExternalLib.ExternalDbContext", fakeContext))
 {
@@ -602,21 +625,62 @@ using (var shims = Shims.ForAssembly(targetAssemblyPath)
 ジェネリックメソッドも差し替え可能**です（subclass override 不可なメソッドが対象）。declaring 型の
 アセンブリは書き換えません。
 
+**対象コード（テスト対象の製品コード。これは変更しない）** — `GatewayUserService` 内の
+`ExternalGateway` 呼び出しが差し替え対象です:
+
 ```csharp
-// 非 virtual メソッド
+// 別アセンブリ ExternalLib：実際は外部呼び出しや DB アクセスなど、テストで動かしたくない処理
+namespace ExternalLib
+{
+    public class ExternalGateway
+    {
+        public string GetName(int id)        { /* …外部リソースへアクセス… */ }
+        public IEnumerable<T> Query<T>(string sql) { /* …DB へクエリ… */ }
+    }
+}
+
+// 書き換え対象アセンブリ TargetApp：テストしたいロジック。上の重い呼び出しを内部で使っている
+namespace TargetApp
+{
+    public class GatewayUserService
+    {
+        public string Run(int id)
+            => new ExternalGateway().GetName(id);                              // ← この呼び出しを差し替える
+
+        public List<GatewayItem> LoadRows()
+            => new ExternalGateway().Query<GatewayItem>("select ...").ToList(); // ← これも
+
+        // 要素型が「書き換え対象アセンブリ側」の DTO（QueryRow）のケース
+        public List<QueryRow> LoadQueryRows()
+            => new ExternalGateway().Query<QueryRow>("select ...").ToList();
+    }
+
+    // 書き換え対象アセンブリ側の DTO（可変プロパティ）。NewList / NewObject の組み立て対象。
+    public class QueryRow
+    {
+        public string Name { get; set; }
+        public int Code { get; set; }
+    }
+}
+```
+
+**テストコード（上の呼び出しを差し替える）**:
+
+```csharp
+// 非 virtual メソッド：GatewayUserService.Run が呼ぶ ExternalGateway.GetName を差し替える
 using (var shims = Shims.ForAssembly(targetAssemblyPath)
         .ReplaceMethod(externalAssemblyPath, "ExternalLib.ExternalGateway", "GetName",
-            (receiver, args) => "fake-" + args[0]))
+            (receiver, args) => "fake-" + args[0]))   // receiver=gateway, args[0]=id
 {
     var svc = shims.CreateObject("TargetApp.GatewayUserService");
     Assert.AreEqual("fake-1", shims.Invoke<string>(svc, "Run", 1));
 }
 
-// ジェネリックメソッド + 戻り値 interface 差し替え（gateway.Query<T>(sql).ToList() の形）
+// ジェネリックメソッド + 戻り値 interface 差し替え：LoadRows が呼ぶ Query<T>(sql).ToList() を差し替える
 using (var shims = Shims.ForAssembly(targetAssemblyPath)
         .ReplaceMethod(externalAssemblyPath, "ExternalLib.ExternalGateway", "Query",
             (receiver, args) => new List<GatewayItem> { new GatewayItem("fake-1") },
-            typeof(IEnumerable<>)))
+            typeof(IEnumerable<>)))                    // 戻り値を IEnumerable<T> として返す
 {
     var svc = shims.CreateObject("TargetApp.GatewayUserService");
     var rows = shims.Invoke<List<GatewayItem>>(svc, "LoadRows");
@@ -646,7 +710,7 @@ shims.ReplaceMethod(externalAssemblyPath, "ExternalLib.ExternalGateway", "Query"
 using (shims)
 {
     var svc = shims.CreateObject("TargetApp.GatewayUserService");
-    var rows = shims.Invoke<System.Collections.IList>(svc, "LoadRows"); // List<書き換え後の型> は IList で受ける
+    var rows = shims.Invoke<System.Collections.IList>(svc, "LoadQueryRows"); // List<書き換え後の型> は IList で受ける
     Assert.AreEqual("A", shims.GetValue<string>(rows[0], "Name"));
 }
 ```
