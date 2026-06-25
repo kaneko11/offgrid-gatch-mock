@@ -72,6 +72,31 @@ namespace MiniMockito.Shims.Experimental.Net48Tests
         }
 
         [TestMethod]
+        public void NewList_BuildsRewrittenRows_FromAnonymousObjects()
+        {
+            // shims を先に宣言してから ReplaceMethod を登録する（delegate 内で shims を参照するため）。
+            Shims shims = Shims.ForAssembly(TargetAssemblyPath);
+            shims.ReplaceMethod(ExternalAssemblyPath, GatewayTypeName, "Query",
+                delegate(object receiver, object[] args)
+                {
+                    return shims.NewList("CrossAssemblySample.SampleRow",
+                        new { Name = "a", Code = 1 },
+                        new { Name = "b", Code = 2 });
+                },
+                typeof(IEnumerable<>));
+            using (shims)
+            {
+                object svc = shims.CreateObject(ServiceTypeName);
+                System.Collections.IList rows = shims.Invoke<System.Collections.IList>(svc, "LoadSampleRows");
+
+                Assert.AreEqual(2, rows.Count);
+                Assert.AreEqual("a", shims.GetValue<string>(rows[0], "Name"));
+                Assert.AreEqual(1, shims.GetValue<int>(rows[0], "Code"));
+                Assert.AreEqual("b", shims.GetValue<string>(rows[1], "Name"));
+            }
+        }
+
+        [TestMethod]
         public void MethodShim_NoMatch_FallsBackToRealMethod()
         {
             using (NewInterceptionHarness harness = NewInterceptionHarness.Create()

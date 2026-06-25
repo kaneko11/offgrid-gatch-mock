@@ -65,6 +65,59 @@ public sealed class MethodShimTests
     }
 
     [TestMethod]
+    public void NewList_BuildsRewrittenRows_FromAnonymousObjects()
+    {
+        // SampleRow lives in the rewrite-target assembly, so canned data must be the *rewritten* type.
+        // shims.NewList(...) builds List<rewritten SampleRow> from anonymous property bags.
+        // NOTE: `shims` is declared first so the shim delegate can reference it (C# forbids referencing
+        // a local inside its own initializer), then ReplaceMethod is registered as a separate statement.
+        var shims = Shims.ForAssembly(TargetAssemblyPath);
+        shims.ReplaceMethod(ExternalAssemblyPath, GatewayTypeName, "Query",
+            (receiver, args) => shims.NewList("CrossAssemblySample.SampleRow",
+                new { Name = "a", Code = 1 },
+                new { Name = "b", Code = 2 }),
+            typeof(IEnumerable<>));
+        using (shims)
+        {
+            var svc = shims.CreateObject(ServiceTypeName);
+            // List<SampleRow_rewritten> cannot be cast to List<SampleRow_original>; read via the shared IList.
+            var rows = shims.Invoke<System.Collections.IList>(svc, "LoadSampleRows");
+
+            Assert.AreEqual(2, rows.Count);
+            Assert.AreEqual("a", shims.GetValue<string>(rows[0]!, "Name"));
+            Assert.AreEqual(1, shims.GetValue<int>(rows[0]!, "Code"));
+            Assert.AreEqual("b", shims.GetValue<string>(rows[1]!, "Name"));
+            Assert.AreEqual(2, shims.GetValue<int>(rows[1]!, "Code"));
+        }
+    }
+
+    [TestMethod]
+    public void NewObject_SetsMembersByName_AndResolvesRewrittenType()
+    {
+        using (var shims = Shims.ForAssembly(TargetAssemblyPath))
+        {
+            var type = shims.GetRewrittenType("CrossAssemblySample.SampleRow");
+            Assert.AreEqual("CrossAssemblySample.SampleRow", type.FullName);
+
+            var row = shims.NewObject("CrossAssemblySample.SampleRow", new { Name = "x", Code = 7 });
+            Assert.AreSame(type, row.GetType());
+            Assert.AreEqual("x", shims.GetValue<string>(row, "Name"));
+            Assert.AreEqual(7, shims.GetValue<int>(row, "Code"));
+        }
+    }
+
+    [TestMethod]
+    public void NewObject_UnknownMember_Throws()
+    {
+        using (var shims = Shims.ForAssembly(TargetAssemblyPath))
+        {
+            var ex = Assert.ThrowsException<System.InvalidOperationException>(
+                () => shims.NewObject("CrossAssemblySample.SampleRow", new { Nope = 1 }));
+            Assert.IsTrue(ex.Message.Contains("Nope"));
+        }
+    }
+
+    [TestMethod]
     public void MethodShim_InternalVirtualMethod_Substitutes()
     {
         // CrossAssemblyUserService.Run calls internal InternalGreeter.Decorate (virtual) in the target assembly.

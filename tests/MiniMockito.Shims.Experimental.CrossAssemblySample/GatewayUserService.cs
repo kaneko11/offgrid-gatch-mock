@@ -30,5 +30,23 @@ namespace CrossAssemblySample
             var gateway = new ExternalGateway();
             return gateway.RawQuery<GatewayItem>("select ...").ToList();
         }
+
+        // 要素型が「書き換え対象アセンブリ側」の DTO（SampleRow）になるケース。
+        // shim 側は shims.NewList("CrossAssemblySample.SampleRow", ...) で rewritten 型の行を組める。
+        public List<SampleRow> LoadSampleRows()
+        {
+            var gateway = new ExternalGateway();
+            return gateway.Query<SampleRow>("select ...").ToList();
+        }
+    }
+
+    /// <summary>
+    /// 書き換え対象アセンブリ側に定義した、可変プロパティを持つ DTO。
+    /// shims.NewObject / NewList が匿名オブジェクトのメンバを名前一致で流し込む対象。
+    /// </summary>
+    public class SampleRow
+    {
+        public string Name { get; set; }
+        public int Code { get; set; }
     }
 }

@@ -135,8 +135,8 @@ dotnet pack src/MiniMockito -c Release -o artifacts
 
 # 1b. Experimental Shims も使う場合（実験的）
 dotnet pack src/MiniMockito.Shims.Experimental -c Release -o artifacts
-# → artifacts/MiniMockito.Shims.Experimental.0.1.0-alpha.7.nupkg
-# → artifacts/MiniMockito.Shims.Experimental.0.1.0-alpha.7.snupkg
+# → artifacts/MiniMockito.Shims.Experimental.0.1.0-alpha.8.nupkg
+# → artifacts/MiniMockito.Shims.Experimental.0.1.0-alpha.8.snupkg
 
 # 1c. 両方まとめてパックする
 dotnet pack -c Release -o artifacts
@@ -146,7 +146,7 @@ dotnet nuget add source C:\path\to\artifacts --name local-minimockito
 
 # 3. テストプロジェクトの .csproj に追加
 # <PackageReference Include="MiniMockito.Net" Version="0.2.0-preview.7" />
-# <PackageReference Include="MiniMockito.Shims.Experimental" Version="0.1.0-alpha.7" />  ← 実験的
+# <PackageReference Include="MiniMockito.Shims.Experimental" Version="0.1.0-alpha.8" />  ← 実験的
 ```
 
 **Shims パッケージに含まれるもの:**
@@ -596,7 +596,7 @@ using (var shims = Shims.ForAssembly(targetAssemblyPath)
 - **`Create<T>()` との関係**: 型 identity が一致する場合のみ使用。cross-assembly / rewritten シナリオでは
   `CreateObject(...)` + `Invoke(...)` + inspection API を基本にしてください。
 
-#### インスタンスメソッドの差し替え（`ReplaceMethod`・Phase 25）
+#### インスタンスメソッドの差し替え（`ReplaceMethod`・Phase 25 / 26）
 
 `new` / static に続く第3の差し替え。**呼び出し側 IL を書き換える**ので、**非 virtual メソッドや
 ジェネリックメソッドも差し替え可能**です（subclass override 不可なメソッドが対象）。declaring 型の
@@ -626,9 +626,41 @@ using (var shims = Shims.ForAssembly(targetAssemblyPath)
 - virtual 不要（call-site 書き換え）。ジェネリックは型引数 1 個まで。
 - **戻り値型の差し替え**: 宣言戻り値が生成不可能な具象型（内部 ctor。EF の `DbRawSqlQuery<T>` 相当）でも、
   直後に `IEnumerable<T>` 等として消費されるなら `returnSubstituteInterface` 指定で差し替え可能。
-- no match は実メソッドにフォールバック。**対象外**: BCL 宣言型メソッド・`ref`/`out`/`params`・複数型引数。
+- no match は実メソッドにフォールバック。**対象外**: BCL 宣言型メソッド・`ref`/`out`・複数型引数。
+
+##### canned 戻り値を組み立てる（`NewObject` / `NewList`・Phase 26）
+
+shim の戻り値は **書き換え後の型**で組む必要があります（同名でも元の型は load context が違い割り当て不可）。
+`NewList` / `NewObject` は型を名前で解決し、**匿名オブジェクトのメンバを名前一致で代入**してくれるので、
+`Activator` + `SetValue` を書かずに済みます。
+
+```csharp
+// shims を先に宣言 → ReplaceMethod を登録（delegate 内で shims を参照するため。
+// C# は using (var shims = ...) の初期化子内で自分自身を参照できない）
+var shims = Shims.ForAssembly(targetAssemblyPath);
+shims.ReplaceMethod(externalAssemblyPath, "ExternalLib.ExternalGateway", "Query",
+    (recv, args) => shims.NewList("TargetApp.QueryRow",
+                                  new { Name = "A", Code = 1 },          // 1 行目
+                                  new { Name = "B", Code = 2 }),         // 2 行目
+    typeof(IEnumerable<>));
+using (shims)
+{
+    var svc = shims.CreateObject("TargetApp.GatewayUserService");
+    var rows = shims.Invoke<System.Collections.IList>(svc, "LoadRows"); // List<書き換え後の型> は IList で受ける
+    Assert.AreEqual("A", shims.GetValue<string>(rows[0], "Name"));
+}
+```
+
+- `NewList(typeFullName, params rows)` … 各 row（プロパティバッグ）から1要素ずつ作り `List<書き換え後の型>` を返す。
+  `typeof(IEnumerable<>)` の戻り値差し替えにそのまま使える。
+- `NewObject(typeFullName, new { ... })` … 単一インスタンス版。
+- `GetRewrittenType(typeFullName)` … 書き換え後アセンブリの型を名前解決（独自に組みたいとき）。
+- `new { Name = "A", Code = 1 }` のように**複数プロパティ・異なる型**を並べられる（設定しないものは既定値）。
+  値の型が違えば変換（`Convert.ChangeType` / enum）し、該当メンバが無ければ分かりやすい例外。
+
 - **EF**: `context.Database.SqlQuery<T>(sql).ToList()` も `Database`/`SqlQuery` を target にし
   `typeof(IEnumerable<>)` 指定で差し替え可能（生 SQL を実行せず canned データを返す）。
+  canned 行は `shims.NewList("My.QueryData", new { 車名 = "テスト車名" })` の形で組める。
 
 > 低レベル API（`NewInterceptionHarness` / `ShimContext` / `WithExternalTarget` / `RegisterShim`）は
 > 引き続き利用可能で、以下の advanced セクションに残しています。Easy API はこれらを内部で利用しています。
@@ -906,7 +938,7 @@ Verify(() => repo.FindById(1), Times.Once());
   <ItemGroup>
     <PackageReference Include="MiniMockito.Net" Version="0.2.0-preview.7" />
     <!-- Shims を使う場合（実験的） -->
-    <PackageReference Include="MiniMockito.Shims.Experimental" Version="0.1.0-alpha.7" />
+    <PackageReference Include="MiniMockito.Shims.Experimental" Version="0.1.0-alpha.8" />
   </ItemGroup>
 </Project>
 ```
