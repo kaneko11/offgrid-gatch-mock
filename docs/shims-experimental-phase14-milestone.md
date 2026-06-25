@@ -706,3 +706,61 @@ wrapper / helper:
 - 型 identity mismatch の根本解決、rewritten→original の自動変換、BCL static method mocking、
   external assembly 自体の rewrite、production in-place rewrite、WPF binding 完全統合、
   expression-based property path API。
+
+---
+
+## Phase 25 — instance method call shim（追記）
+
+### 目標
+
+`new` 差し替え（Phase 20/21/23）・user-defined static 差し替え（Phase 14）に続く第3の差し替え種別＝
+**インスタンスメソッド呼び出しの差し替え（method shim）** を追加。**呼び出し側（rewrite 対象アセンブリ）の
+call site IL を書き換える**方式なので、メソッドが virtual かどうかに関係なく差し替えられる（subclass
+override 不可なメソッドも対象）。declaring 型のアセンブリ（外部 DLL / EntityFramework 等）は書き換えない。
+
+### 追加 API
+
+| API | 内容 |
+|-----|------|
+| `NewInterceptionHarness.WithMethodTarget<T>(methodName, returnSubstituteInterface?)` | call site allowlist 登録 |
+| `NewInterceptionHarness.WithMethodTarget(Type, methodName, ...)` / `(assemblyPath, typeFullName, methodName, ...)` | Type / 文字列指定 |
+| `NewInterceptionHarness.RegisterMethodShim(Type/typeFullName, methodName, Func<receiver, args, result>)` | shim 本体登録（last wins） |
+| `Shims.ReplaceMethod<T>(...)` / `ReplaceMethod(Type, ...)` / `ReplaceMethod(assemblyPath, typeFullName, ...)` | Easy API |
+| `ShimDispatcher.TryInvokeMethod(key, receiver, args, out result)` | rewrite 済み call site の入口 |
+| `MethodShimRegistry` / `ShimContext.MethodRegistry` / `LastMethodShimResolved` | registry / 診断 |
+
+### call-site 書き換えの方式
+
+- 一致した `call`/`callvirt`（instance）を、生成した **concrete 静的ラッパー**呼び出しに置換。
+  ラッパーは `receiver`＋boxed args を組み立て、`ShimDispatcher.TryInvokeMethod` を呼び、
+  ヒット時は登録 shim の戻り値を（戻り値型へ cast して）返し、未ヒット時は**実メソッドを呼ぶ（フォールバック）**。
+- **ジェネリックメソッドは call site の具象インスタンス化（例 `Query<GatewayItem>`）ごとに非ジェネリックな
+  concrete ラッパーを生成**する（ジェネリックメソッド emit を避け IL リスクを低減）。型引数は 1 個まで。
+- **戻り値型の差し替え**: 宣言戻り値型が生成不可能な具象型（内部 ctor。EF の `DbRawSqlQuery<T>` 相当）でも、
+  結果が直後に **interface（`IEnumerable<T>` 等）として消費**されるなら、ラッパー戻り値型をその interface に
+  差し替えて置換する（利用者が open generic interface を指定）。消費先が call/callvirt でない等で安全に
+  差し替えられない場合は skip + 診断。
+- 型 identity: method target の declaring 型アセンブリ（rewrite 対象でないもの）と要素型アセンブリは
+  parent ALC から共有する（canned データの要素型が rewrite 後 identity と一致するように）。
+
+### 対象 / 対象外
+
+- 対象: 非 BCL 宣言型の public インスタンスメソッド（virtual/非 virtual）、単純引数、型引数 1 個のジェネリック、
+  生成可能な戻り値型＋上記の interface-consumed 差し替え、no match フォールバック、internal/external 両対応。
+- 対象外: BCL 宣言型メソッド、`ref`/`out`/`params`、複数型引数、ジェネリックパラメータ型の引数、
+  生成不可能な具象を**そのまま具象として**返すケース、プロパティ/インデクサ、static の新規。
+
+### 追加テスト
+
+- `tests/MiniMockito.Shims.Experimental.Tests/MethodShimTests.cs`（net8, 7 件）
+- `tests/MiniMockito.Shims.Experimental.Net48Tests/Net48MethodShimTests.cs`（net48, 4 件）
+- サンプル: `ExternalLib.ExternalGateway`（`GetName` / `Query<T>` / `RawQuery<T>`）・`GatewayItem`・
+  `RawResult<T>`（internal ctor）、`CrossAssemblySample.GatewayUserService`（`Run` / `LoadRows` / `LoadRawRows`）。
+
+### 実案件への適用（EF）
+
+- repository が `List<T>` / DTO を返すメソッドは method shim で差し替え可能。
+- EF の `context.Database.SqlQuery<T>(sql).ToList()` も、戻り値が `IEnumerable<T>` として即消費されるため、
+  `Database` 型・`SqlQuery` メソッドを method target にして `returnSubstituteInterface = typeof(IEnumerable<>)` を
+  指定すれば**理論上差し替え可能**（生 SQL を実行せず canned データを返す）。`DbRawSqlQuery<T>` をローカルに格納
+  する形は対象外。BCL static（`DateTime.Now` 等）は引き続き未対応。

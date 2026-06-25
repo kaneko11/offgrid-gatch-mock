@@ -69,6 +69,42 @@ public static class ShimDispatcher
         return CreateRealInstanceWithArgs<T>(targetType, args);
     }
 
+    /// <summary>
+    /// Entry point for rewritten <b>instance method</b> call sites (Phase 25).  Looks up a registered
+    /// method shim for <paramref name="methodKey"/> (<c>DeclaringTypeFullName::MethodName</c>) in the
+    /// active <see cref="ShimContext"/>.  When found, the shim is invoked and its result returned via
+    /// <paramref name="result"/>; the generated wrapper casts it to the call's (possibly substituted)
+    /// return type.  When not found, returns <see langword="false"/> and the wrapper invokes the real method.
+    /// </summary>
+    /// <param name="methodKey">The method key (<c>DeclaringTypeFullName::MethodName</c>).</param>
+    /// <param name="receiver">The call receiver (boxed for value types), or <see langword="null"/>.</param>
+    /// <param name="args">The boxed call arguments in declaration order.</param>
+    /// <param name="result">The shim's return value when a shim is found; otherwise <see langword="null"/>.</param>
+    /// <returns><see langword="true"/> if a method shim handled the call.</returns>
+    public static bool TryInvokeMethod(string methodKey, object? receiver, object?[] args, out object? result)
+    {
+        ThrowHelper.ThrowIfNull(methodKey);
+        ThrowHelper.ThrowIfNull(args);
+
+        var context = ShimContext.Current;
+        if (context is { IsDisposed: false }
+            && context.MethodRegistry.TryGet(methodKey, out var shim)
+            && shim is not null)
+        {
+            result = shim(receiver, args);
+            context.LastMethodShimResolved = true;
+            return true;
+        }
+
+        if (context is { IsDisposed: false })
+        {
+            context.LastMethodShimResolved = false;
+        }
+
+        result = null;
+        return false;
+    }
+
     private static T CreateRealInstance<T>(Type targetType)
     {
         if (!targetType.IsClass)

@@ -202,6 +202,46 @@ public sealed class Shims : IDisposable
         return this;
     }
 
+    /// <summary>
+    /// Easy API (Phase 25): replaces calls to <paramref name="declaringType"/>.<paramref name="methodName"/>
+    /// (an instance method) with <paramref name="shim"/>.  For generic methods supply
+    /// <paramref name="returnSubstituteInterface"/> (open generic interface, e.g. <c>typeof(IEnumerable&lt;&gt;)</c>).
+    /// </summary>
+    public Shims ReplaceMethod(Type declaringType, string methodName, Func<object?, object?[], object?> shim, Type? returnSubstituteInterface = null)
+    {
+        ThrowIfDisposed();
+        ThrowIfFinalizedForReplaceNew();
+        if (declaringType == null) throw new ArgumentNullException(nameof(declaringType));
+        if (string.IsNullOrWhiteSpace(methodName)) throw new ArgumentException("Method name must be provided.", nameof(methodName));
+        if (shim == null) throw new ArgumentNullException(nameof(shim));
+
+        _harness.WithMethodTarget(declaringType, methodName, returnSubstituteInterface);
+        _pendingReplacements.Add(s => s._harness.RegisterMethodShim(declaringType, methodName, shim));
+        return this;
+    }
+
+    /// <summary>Easy API (Phase 25): instance-method shim by generic declaring type.</summary>
+    public Shims ReplaceMethod<TDeclaring>(string methodName, Func<object?, object?[], object?> shim, Type? returnSubstituteInterface = null)
+        => ReplaceMethod(typeof(TDeclaring), methodName, shim, returnSubstituteInterface);
+
+    /// <summary>
+    /// Easy API (Phase 25): instance-method shim for an external declaring type identified by assembly
+    /// path + type full name (no compile-time reference needed).
+    /// </summary>
+    public Shims ReplaceMethod(string externalAssemblyPath, string typeFullName, string methodName, Func<object?, object?[], object?> shim, Type? returnSubstituteInterface = null)
+    {
+        ThrowIfDisposed();
+        ThrowIfFinalizedForReplaceNew();
+        if (string.IsNullOrWhiteSpace(externalAssemblyPath)) throw new ArgumentException("External assembly path must be provided.", nameof(externalAssemblyPath));
+        if (string.IsNullOrWhiteSpace(typeFullName)) throw new ArgumentException("Type full name must be provided.", nameof(typeFullName));
+        if (string.IsNullOrWhiteSpace(methodName)) throw new ArgumentException("Method name must be provided.", nameof(methodName));
+        if (shim == null) throw new ArgumentNullException(nameof(shim));
+
+        _harness.WithMethodTarget(externalAssemblyPath, typeFullName, methodName, returnSubstituteInterface);
+        _pendingReplacements.Add(s => s._harness.RegisterMethodShim(typeFullName, methodName, shim));
+        return this;
+    }
+
     private void DeclareNewTarget(Type type)
     {
         if (IsInternalTarget(type))

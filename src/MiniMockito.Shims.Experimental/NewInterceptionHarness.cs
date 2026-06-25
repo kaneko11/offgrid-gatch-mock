@@ -40,6 +40,7 @@ public sealed class NewInterceptionHarness : IDisposable
     private readonly List<Type> _targetTypes = [];
     private readonly List<ExternalNewTarget> _externalTargets = [];
     private readonly List<Type> _staticTargetTypes = [];
+    private readonly List<MethodTargetEntry> _methodTargets = [];
     private readonly List<string> _diagnostics = [];
     private readonly Dictionary<string, HashSet<string>> _externalRegistryKeys = new(StringComparer.Ordinal);
     private RewrittenAssemblyLoader? _loader;
@@ -224,6 +225,41 @@ public sealed class NewInterceptionHarness : IDisposable
     }
 
     /// <summary>
+    /// Adds an instance-method call-site target (Phase 25): call sites to
+    /// <typeparamref name="TDeclaring"/>.<paramref name="methodName"/> inside the rewritten assembly
+    /// are redirected to a method shim.  For generic methods, supply <paramref name="returnSubstituteInterface"/>
+    /// (an open generic interface such as <c>typeof(IEnumerable&lt;&gt;)</c>) used as the wrapper return type.
+    /// </summary>
+    public NewInterceptionHarness WithMethodTarget<TDeclaring>(string methodName, Type? returnSubstituteInterface = null)
+        => WithMethodTarget(typeof(TDeclaring), methodName, returnSubstituteInterface);
+
+    /// <summary>Adds an instance-method call-site target by <see cref="Type"/> (Phase 25).</summary>
+    public NewInterceptionHarness WithMethodTarget(Type declaringType, string methodName, Type? returnSubstituteInterface = null)
+    {
+        ThrowHelper.ThrowIfDisposed(_disposed, this);
+        ThrowHelper.ThrowIfNull(declaringType);
+        ThrowHelper.ThrowIfNullOrWhiteSpace(methodName);
+
+        var fullName = declaringType.FullName
+            ?? throw new InvalidOperationException($"Type {declaringType.Name} has no FullName.");
+        _methodTargets.Add(new MethodTargetEntry(
+            fullName, methodName, returnSubstituteInterface, declaringType.Assembly.GetName().Name ?? string.Empty));
+        Diag($"Method target registered: {fullName}::{methodName}.");
+        return this;
+    }
+
+    /// <summary>
+    /// Adds an instance-method call-site target by external assembly path + type full name (Phase 25),
+    /// without a compile-time reference to the declaring type.
+    /// </summary>
+    public NewInterceptionHarness WithMethodTarget(string assemblyPath, string typeFullName, string methodName, Type? returnSubstituteInterface = null)
+    {
+        ThrowHelper.ThrowIfDisposed(_disposed, this);
+        var resolved = ResolveExternalType(assemblyPath, typeFullName);
+        return WithMethodTarget(resolved, methodName, returnSubstituteInterface);
+    }
+
+    /// <summary>
     /// Rewrites the assembly that contains the first registered target type (or the first static
     /// target type if no newobj targets are registered) and loads the output into an isolated
     /// <see cref="ShimAssemblyLoadContext"/>.
@@ -267,16 +303,24 @@ public sealed class NewInterceptionHarness : IDisposable
                 TargetTypes = _targetTypes.ToArray(),
                 ExternalTargetTypes = _externalTargets.Select(t => t.OriginalType).ToArray(),
                 StaticTargetTypes = _staticTargetTypes.ToArray(),
+                MethodTargets = _methodTargets
+                    .Select(e => new MethodShimTarget(e.DeclaringTypeFullName, e.MethodName, e.ReturnSubstituteInterface, e.AssemblySimpleName))
+                    .ToArray(),
             });
 
         // Pass the original assembly directory so the ALC can probe for dependencies
         // that are not in the temp output directory.
         var originalDir = Path.GetDirectoryName(inputAssemblyPath);
 
-        // External target assemblies must be shared from the parent ALC so the external type keeps a
-        // single runtime identity across the rewrite boundary (required for fake substitution).
+        // External target assemblies (and method-shim declaring assemblies that are NOT the rewritten
+        // assembly) must be shared from the parent ALC so those types keep a single runtime identity
+        // across the rewrite boundary — required so test-supplied fakes / canned data are assignable.
+        var targetSimpleName = Path.GetFileNameWithoutExtension(inputAssemblyPath);
         var sharedAssemblyNames = _externalTargets
             .Select(t => t.AssemblySimpleName)
+            .Concat(_methodTargets
+                .Select(e => e.AssemblySimpleName)
+                .Where(name => !string.Equals(name, targetSimpleName, StringComparison.OrdinalIgnoreCase)))
             .Where(name => !string.IsNullOrEmpty(name))
             .Distinct(StringComparer.OrdinalIgnoreCase)
             .ToArray();
@@ -530,6 +574,32 @@ public sealed class NewInterceptionHarness : IDisposable
     }
 
     /// <summary>
+    /// Registers an instance-method shim (Phase 25) for the previously declared
+    /// <see cref="WithMethodTarget(Type, string, Type)"/> target.  The shim receives the call receiver
+    /// and boxed arguments and returns the replacement result.  Last registration wins.
+    /// </summary>
+    public void RegisterMethodShim(Type declaringType, string methodName, Func<object?, object?[], object?> shim)
+    {
+        ThrowHelper.ThrowIfNull(declaringType);
+        RegisterMethodShim(declaringType.FullName!, methodName, shim);
+    }
+
+    /// <summary>Registers an instance-method shim by declaring type full name (Phase 25).</summary>
+    public void RegisterMethodShim(string declaringTypeFullName, string methodName, Func<object?, object?[], object?> shim)
+    {
+        ThrowHelper.ThrowIfDisposed(_disposed, this);
+        ThrowHelper.ThrowIfNullOrWhiteSpace(declaringTypeFullName);
+        ThrowHelper.ThrowIfNullOrWhiteSpace(methodName);
+        ThrowHelper.ThrowIfNull(shim);
+        EnsureRewritten();
+
+        var context = ShimContext.RequireCurrent();
+        context.EnsureActive();
+        context.MethodRegistry.Register(declaringTypeFullName, methodName, shim);
+        Diag($"Method shim registered: {declaringTypeFullName}::{methodName}.");
+    }
+
+    /// <summary>
     /// Registers a shim rule with optional argument matchers for <typeparamref name="TTarget"/>
     /// in the active <see cref="ShimContext"/>.
     /// When <paramref name="matchers"/> is empty the rule is a catch-all (matches any args).
@@ -639,6 +709,22 @@ public sealed class NewInterceptionHarness : IDisposable
     }
 
     private void Diag(string message) => _diagnostics.Add(message);
+
+    private sealed class MethodTargetEntry
+    {
+        public MethodTargetEntry(string declaringTypeFullName, string methodName, Type? returnSubstituteInterface, string assemblySimpleName)
+        {
+            DeclaringTypeFullName = declaringTypeFullName;
+            MethodName = methodName;
+            ReturnSubstituteInterface = returnSubstituteInterface;
+            AssemblySimpleName = assemblySimpleName;
+        }
+
+        public string DeclaringTypeFullName { get; }
+        public string MethodName { get; }
+        public Type? ReturnSubstituteInterface { get; }
+        public string AssemblySimpleName { get; }
+    }
 
     /// <summary>
     /// Invokes a public instance method on the given object using reflection and returns the result.
