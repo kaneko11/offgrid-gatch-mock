@@ -114,7 +114,9 @@ public static class MethodCallRewriter
             return false;
         }
 
-        // ref / out / params / generic-parameter parameters are out of scope.
+        // ref / out / generic-parameter parameters are out of scope.
+        // (params object[] is allowed: at the IL level it is a normal object[] argument that is passed
+        //  through to the shim via args — this is what enables EF's SqlQuery<T>(string, params object[]).)
         foreach (var p in callee.Parameters)
         {
             if (p.ParameterType is ByReferenceType)
@@ -126,12 +128,6 @@ public static class MethodCallRewriter
             if (p.ParameterType is GenericParameter || p.ParameterType.ContainsGenericParameter)
             {
                 diagnostics.Add($"Method call site skipped: {site}. Skipped reason: generic parameter type is not supported.");
-                return false;
-            }
-
-            if (p.HasCustomAttributes && p.CustomAttributes.Any(a => a.AttributeType.FullName == "System.ParamArrayAttribute"))
-            {
-                diagnostics.Add($"Method call site skipped: {site}. Skipped reason: params parameter is not supported.");
                 return false;
             }
         }

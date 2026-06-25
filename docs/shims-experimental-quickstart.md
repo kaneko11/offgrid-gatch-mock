@@ -140,7 +140,7 @@ experimental package は本体 release の安定性に影響しません。
 <!-- 本体（net8.0 / net48） -->
 <PackageReference Include="MiniMockito.Net" Version="0.2.0-preview.7" />
 <!-- 実験パッケージ（test-only・API は変わり得ます） -->
-<PackageReference Include="MiniMockito.Shims.Experimental" Version="0.1.0-alpha.6" />
+<PackageReference Include="MiniMockito.Shims.Experimental" Version="0.1.0-alpha.7" />
 ```
 
 ローカル検証時は `dotnet pack -c Release -o artifacts` で nupkg を生成し、`artifacts` を NuGet ソースに
