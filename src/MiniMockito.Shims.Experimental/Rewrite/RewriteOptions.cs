@@ -24,6 +24,13 @@ public sealed class RewriteOptions
     public IReadOnlyList<Type> StaticTargetTypes { get; init; } = [];
 
     /// <summary>
+    /// Gets the allowlisted instance-method call sites to rewrite (Phase 25).
+    /// Each entry identifies a declaring type full name + method name whose <c>call</c>/<c>callvirt</c>
+    /// sites in the target assembly are redirected to a method shim wrapper.
+    /// </summary>
+    public IReadOnlyList<MethodShimTarget> MethodTargets { get; init; } = [];
+
+    /// <summary>
     /// Gets a value indicating whether the rewriter should copy nearby runtime files to the output directory.
     /// </summary>
     public bool CopyRuntimeFiles { get; init; } = true;

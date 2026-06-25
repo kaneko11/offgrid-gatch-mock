@@ -68,6 +68,12 @@ public static class AssemblyRewriter
             rewrittenCount += staticResult.RewrittenCallSiteCount;
         }
 
+        // Phase 25: also rewrite allowlisted instance-method call sites.
+        if (options.MethodTargets.Count > 0)
+        {
+            rewrittenCount += MethodCallRewriter.Rewrite(module, options, diagnostics);
+        }
+
         module.Write(
             outputFullPath,
             new WriterParameters

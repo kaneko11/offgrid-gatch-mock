@@ -98,11 +98,11 @@ samples/
 | アセンブリ | フレームワーク | 合格 | 失敗 |
 |-----------|--------------|------|------|
 | MiniMockito.Tests | net8.0 | 77 | 0 |
-| MiniMockito.Shims.Experimental.Tests | net8.0 | 296 | 0 |
-| MiniMockito.Shims.Experimental.Net48Tests | net48 | 58 | 0 |
+| MiniMockito.Shims.Experimental.Tests | net8.0 | 303 | 0 |
+| MiniMockito.Shims.Experimental.Net48Tests | net48 | 62 | 0 |
 | MiniMockito.Net48X86Tests | net48 | 26 | 0 |
 | MiniMockito.Sample.MSTest | net8.0 | 6 | 0 |
-| **合計** | | **463** | **0** |
+| **合計** | | **474** | **0** |
 
 ---
 
@@ -135,8 +135,8 @@ dotnet pack src/MiniMockito -c Release -o artifacts
 
 # 1b. Experimental Shims も使う場合（実験的）
 dotnet pack src/MiniMockito.Shims.Experimental -c Release -o artifacts
-# → artifacts/MiniMockito.Shims.Experimental.0.1.0-alpha.6.nupkg
-# → artifacts/MiniMockito.Shims.Experimental.0.1.0-alpha.6.snupkg
+# → artifacts/MiniMockito.Shims.Experimental.0.1.0-alpha.7.nupkg
+# → artifacts/MiniMockito.Shims.Experimental.0.1.0-alpha.7.snupkg
 
 # 1c. 両方まとめてパックする
 dotnet pack -c Release -o artifacts
@@ -146,7 +146,7 @@ dotnet nuget add source C:\path\to\artifacts --name local-minimockito
 
 # 3. テストプロジェクトの .csproj に追加
 # <PackageReference Include="MiniMockito.Net" Version="0.2.0-preview.7" />
-# <PackageReference Include="MiniMockito.Shims.Experimental" Version="0.1.0-alpha.6" />  ← 実験的
+# <PackageReference Include="MiniMockito.Shims.Experimental" Version="0.1.0-alpha.7" />  ← 実験的
 ```
 
 **Shims パッケージに含まれるもの:**
@@ -596,6 +596,40 @@ using (var shims = Shims.ForAssembly(targetAssemblyPath)
 - **`Create<T>()` との関係**: 型 identity が一致する場合のみ使用。cross-assembly / rewritten シナリオでは
   `CreateObject(...)` + `Invoke(...)` + inspection API を基本にしてください。
 
+#### インスタンスメソッドの差し替え（`ReplaceMethod`・Phase 25）
+
+`new` / static に続く第3の差し替え。**呼び出し側 IL を書き換える**ので、**非 virtual メソッドや
+ジェネリックメソッドも差し替え可能**です（subclass override 不可なメソッドが対象）。declaring 型の
+アセンブリは書き換えません。
+
+```csharp
+// 非 virtual メソッド
+using (var shims = Shims.ForAssembly(targetAssemblyPath)
+        .ReplaceMethod(externalAssemblyPath, "ExternalLib.ExternalGateway", "GetName",
+            (receiver, args) => "fake-" + args[0]))
+{
+    var svc = shims.CreateObject("TargetApp.GatewayUserService");
+    Assert.AreEqual("fake-1", shims.Invoke<string>(svc, "Run", 1));
+}
+
+// ジェネリックメソッド + 戻り値 interface 差し替え（gateway.Query<T>(sql).ToList() の形）
+using (var shims = Shims.ForAssembly(targetAssemblyPath)
+        .ReplaceMethod(externalAssemblyPath, "ExternalLib.ExternalGateway", "Query",
+            (receiver, args) => new List<GatewayItem> { new GatewayItem("fake-1") },
+            typeof(IEnumerable<>)))
+{
+    var svc = shims.CreateObject("TargetApp.GatewayUserService");
+    var rows = shims.Invoke<List<GatewayItem>>(svc, "LoadRows");
+}
+```
+
+- virtual 不要（call-site 書き換え）。ジェネリックは型引数 1 個まで。
+- **戻り値型の差し替え**: 宣言戻り値が生成不可能な具象型（内部 ctor。EF の `DbRawSqlQuery<T>` 相当）でも、
+  直後に `IEnumerable<T>` 等として消費されるなら `returnSubstituteInterface` 指定で差し替え可能。
+- no match は実メソッドにフォールバック。**対象外**: BCL 宣言型メソッド・`ref`/`out`/`params`・複数型引数。
+- **EF**: `context.Database.SqlQuery<T>(sql).ToList()` も `Database`/`SqlQuery` を target にし
+  `typeof(IEnumerable<>)` 指定で差し替え可能（生 SQL を実行せず canned データを返す）。
+
 > 低レベル API（`NewInterceptionHarness` / `ShimContext` / `WithExternalTarget` / `RegisterShim`）は
 > 引き続き利用可能で、以下の advanced セクションに残しています。Easy API はこれらを内部で利用しています。
 
@@ -872,7 +906,7 @@ Verify(() => repo.FindById(1), Times.Once());
   <ItemGroup>
     <PackageReference Include="MiniMockito.Net" Version="0.2.0-preview.7" />
     <!-- Shims を使う場合（実験的） -->
-    <PackageReference Include="MiniMockito.Shims.Experimental" Version="0.1.0-alpha.6" />
+    <PackageReference Include="MiniMockito.Shims.Experimental" Version="0.1.0-alpha.7" />
   </ItemGroup>
 </Project>
 ```

@@ -74,6 +74,15 @@ public sealed class ShimContext : IDisposable
 
     internal StaticShimRegistry StaticRegistry { get; } = new();
 
+    internal MethodShimRegistry MethodRegistry { get; } = new();
+
+    /// <summary>
+    /// Gets a value indicating whether the most recent rewritten instance-method call site (Phase 25)
+    /// was served by a registered method shim (<see langword="true"/>) or fell back to the real method
+    /// (<see langword="false"/>).  <see langword="null"/> if no method dispatch has occurred yet.
+    /// </summary>
+    public bool? LastMethodShimResolved { get; internal set; }
+
     internal bool IsDisposed => _disposed;
 
     internal static ShimContext? Current => CurrentContext.Value;
@@ -108,6 +117,7 @@ public sealed class ShimContext : IDisposable
         {
             Registry.Clear();
             StaticRegistry.Clear();
+            MethodRegistry.Clear();
         }
         catch (Exception ex)
         {

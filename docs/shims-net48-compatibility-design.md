@@ -1196,3 +1196,53 @@ public sealed class Net48InspectionSample
 - `Create<T>()` が安全でない場合は `CreateObject(...)` + `Invoke(...)` + inspection API を使う。
 - BCL static method は未対応。external assembly 自体は rewrite しない。
 - `[assembly: DoNotParallelize]` 必須。
+
+---
+
+## 20. Phase 25 — instance method call shim の net48 対応（追記）
+
+インスタンスメソッド差し替え（`ReplaceMethod` / `WithMethodTarget` + `RegisterMethodShim`）は net48 でも
+動作します。C# 7.3 では `using var` を使わず `using (...) { }` を使い、ラムダの代わりに匿名 delegate も使えます。
+
+### 20.1 net48 / C# 7.3 sample（using statement 形式）
+
+```csharp
+using System;
+using System.Collections.Generic;
+using System.IO;
+using ExternalLib;
+using Microsoft.VisualStudio.TestTools.UnitTesting;
+using MiniMockito.Shims.Experimental;
+
+[TestClass]
+[DoNotParallelize]
+public sealed class Net48MethodShimSample
+{
+    [TestMethod]
+    public void ReplaceMethod_Generic_OnNet48()
+    {
+        string targetAssemblyPath = typeof(CrossAssemblySample.GatewayUserService).Assembly.Location;
+        string externalAssemblyPath = Path.Combine(AppDomain.CurrentDomain.BaseDirectory, "ExternalLib.dll");
+
+        using (Shims shims = Shims.ForAssembly(targetAssemblyPath)
+            .ReplaceMethod(externalAssemblyPath, "ExternalLib.ExternalGateway", "Query",
+                delegate(object receiver, object[] args) { return new List<GatewayItem> { new GatewayItem("fake-1") }; },
+                typeof(IEnumerable<>)))
+        {
+            object svc = shims.CreateObject("CrossAssemblySample.GatewayUserService");
+            List<GatewayItem> rows = shims.Invoke<List<GatewayItem>>(svc, "LoadRows");
+
+            Assert.AreEqual(1, rows.Count);
+            Assert.AreEqual("fake-1", rows[0].Name);
+        }
+    }
+}
+```
+
+### 20.2 net48 特有の注意（Phase 25）
+
+- call-site 書き換え方式のため net48 でも virtual/非 virtual を問わず差し替え可能。
+- ジェネリックは型引数 1 個まで（call site の具象インスタンス化ごとに concrete ラッパー生成）。
+- 戻り値型の差し替えは「直後に interface として消費される」場合のみ。
+- declaring 型・要素型のアセンブリ（rewrite 対象でないもの）は parent から共有される（既存の AssemblyResolve 経由）。
+- BCL 宣言型メソッドは未対応。`[assembly: DoNotParallelize]` 必須。

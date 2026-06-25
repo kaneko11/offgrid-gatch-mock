@@ -22,6 +22,23 @@
 
 > **⚠️ EXPERIMENTAL / TEST-ONLY。API は予告なく変更されます。production への組み込み不可。**
 
+### 0.1.0-alpha.7
+
+- インスタンスメソッドの call-site 差し替え（method shim）を追加（Phase 25）。
+  - `Shims.ForAssembly(path).ReplaceMethod(declaringType, methodName, func, substituteInterface?)`、
+    `ReplaceMethod<TDeclaring>(...)`、`ReplaceMethod(externalAssemblyPath, typeFullName, methodName, func, substituteInterface?)`。
+  - 呼び出し側 IL を書き換えるため、**non-virtual メソッドや型引数 1 個のジェネリックメソッド**も差し替え可能
+    （宣言アセンブリの subclass override が不要）。
+  - **interface return substitution**: 宣言された戻り値型が構築不可（internal ctor 等。例: EF6 の
+    `DbRawSqlQuery<T>`）でも、結果が直後に interface として消費される call site（例: `.ToList()` が
+    `IEnumerable<T>` を消費）であれば、ラッパー戻り値をその interface 型にして差し替え可能。
+  - `ReplaceNew(...)` と併用して、`new DbContext()` を fake に差し替えつつ
+    `context.Database.SqlQuery<T>(sql).ToList()` を canned データへ置換 ―― 実 DB 接続なしで検証できる。
+- BCL 宣言型のメソッド（`DateTime.Now` / `File.ReadAllText` 等）は引き続き対象外。
+- public API の破壊的変更なし（追加のみ）。
+
+対象フレームワーク: `net8.0`, `net48`。XML ドキュメント・シンボル（snupkg）同梱。依存: `Mono.Cecil`。
+
 ### 0.1.0-alpha.6
 
 - Phase 20 / 21 / 23 / 24 の成果をまとめた alpha。

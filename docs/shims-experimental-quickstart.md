@@ -39,6 +39,7 @@
 | cross-assembly diagnostics（解決/登録/rewrite/skip/registry key/duplicate risk） | ✅ 対応 (Phase 21) |
 | Easy API `Shims.ForAssembly(...).ReplaceNew(...)`（複数登録 / internal・external 混在 / last stub wins） | ✅ 対応 (Phase 23) |
 | Inspection API（`GetValue<T>` / `GetCollection` / `ShimsObject` で rewritten object graph を path 検証） | ✅ 対応 (Phase 24) |
+| インスタンスメソッド呼び出しの差し替え（`ReplaceMethod` / method shim・非 virtual / ジェネリック / 戻り値 interface 差し替え） | ✅ 対応 (Phase 25) |
 | ShimContext.Dispose() で確実に cleanup | ✅ 対応 |
 
 ---
@@ -139,7 +140,7 @@ experimental package は本体 release の安定性に影響しません。
 <!-- 本体（net8.0 / net48） -->
 <PackageReference Include="MiniMockito.Net" Version="0.2.0-preview.7" />
 <!-- 実験パッケージ（test-only・API は変わり得ます） -->
-<PackageReference Include="MiniMockito.Shims.Experimental" Version="0.1.0-alpha.6" />
+<PackageReference Include="MiniMockito.Shims.Experimental" Version="0.1.0-alpha.7" />
 ```
 
 ローカル検証時は `dotnet pack -c Release -o artifacts` で nupkg を生成し、`artifacts` を NuGet ソースに
@@ -254,6 +255,44 @@ API:
   （requested path / failed segment / runtime type / reason、識別不一致時は「different load context」ヒント）。
 - **`Create<T>()` との関係**: 型 identity が一致する場合のみ使用。cross-assembly / rewritten シナリオでは
   `CreateObject(...)` + `Invoke(...)` + inspection API を基本にします。
+
+### 6.0d インスタンスメソッド差し替え（`ReplaceMethod`・Phase 25）
+
+`new` / static に続く第3の差し替え。**呼び出し側 IL を書き換える**ので、**非 virtual メソッドや
+ジェネリックメソッドも差し替え**できます（subclass override 不可なメソッドが対象）。declaring 型の
+アセンブリ（外部 DLL）は書き換えません。
+
+```csharp
+// 非 virtual メソッド
+using (var shims = Shims.ForAssembly(targetAssemblyPath)
+                        .ReplaceMethod(externalAssemblyPath, "ExternalLib.ExternalGateway", "GetName",
+                            (receiver, args) => "fake-" + args[0]))
+{
+    var svc = shims.CreateObject("TargetApp.GatewayUserService");
+    var result = shims.Invoke<string>(svc, "Run", 1);   // 内部の gateway.GetName(1) → "fake-1"
+}
+
+// ジェネリックメソッド（戻り値を interface に差し替え）。
+// gateway.Query<T>(sql).ToList() のように「即 IEnumerable<T> として消費」される call site が対象。
+using (var shims = Shims.ForAssembly(targetAssemblyPath)
+                        .ReplaceMethod(externalAssemblyPath, "ExternalLib.ExternalGateway", "Query",
+                            (receiver, args) => new List<GatewayItem> { new GatewayItem("fake-1") },
+                            typeof(IEnumerable<>)))   // ← 戻り値の差し替え先 interface（open generic）
+{
+    var svc = shims.CreateObject("TargetApp.GatewayUserService");
+    var rows = shims.Invoke<List<GatewayItem>>(svc, "LoadRows");
+}
+```
+
+- **virtual 不要**: call-site 書き換えなので非 virtual / 生成不可能戻り値型でも差し替え可能。
+- **ジェネリック**: 型引数 1 個まで。call site の具象インスタンス化ごとに concrete ラッパーを生成。
+- **戻り値型の差し替え**: 宣言戻り値が生成不可能な具象型（内部 ctor。EF の `DbRawSqlQuery<T>` 相当）でも、
+  結果が直後に `IEnumerable<T>` 等の interface として消費されるなら、`returnSubstituteInterface` に
+  open generic interface を指定して差し替え可能。安全に差し替えられない消費形（具象型のローカルに格納等）は skip + 診断。
+- **no match フォールバック**: shim 未登録の call site は実メソッドを呼ぶ。
+- **対象外**: BCL 宣言型メソッド（`DateTime.Now` 等）、`ref`/`out`/`params`、複数型引数、プロパティ/インデクサ。
+- **EF 適用**: `context.Database.SqlQuery<T>(sql).ToList()` は、`Database`/`SqlQuery` を method target にして
+  `returnSubstituteInterface = typeof(IEnumerable<>)` を指定すれば差し替え可能（生 SQL を実行せず canned データを返す）。
 
 ---
 
