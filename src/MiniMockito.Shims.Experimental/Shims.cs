@@ -408,6 +408,128 @@ public sealed class Shims : IDisposable
     }
 
     /// <summary>
+    /// Easy API (Phase 26): resolves a type from the rewritten assembly by its full name.
+    ///
+    /// <para>Useful inside a <see cref="ReplaceMethod(Type, string, Func{object, object[], object}, Type)"/>
+    /// shim to build canned return values whose identity matches the rewritten load context (a hand-made
+    /// instance of the same-named original type would not be assignable).</para>
+    /// </summary>
+    /// <param name="typeFullName">The full name of the rewritten type (e.g. <c>"My.Namespace.QueryData"</c>).</param>
+    /// <exception cref="InvalidOperationException">The type was not found in the rewritten assembly.</exception>
+    public Type GetRewrittenType(string typeFullName)
+    {
+        ThrowIfDisposed();
+        if (string.IsNullOrWhiteSpace(typeFullName))
+            throw new ArgumentException("Type full name must be provided.", nameof(typeFullName));
+
+        var assembly = GetRewrittenAssembly();
+        var type = assembly.GetType(typeFullName, throwOnError: false);
+        if (type == null)
+            throw new InvalidOperationException(
+                "GetRewrittenType: type '" + typeFullName + "' was not found in the rewritten assembly '" +
+                assembly.GetName().Name + "'.");
+        return type;
+    }
+
+    /// <summary>
+    /// Easy API (Phase 26): creates an instance of the rewritten type named <paramref name="typeFullName"/>
+    /// and assigns members from <paramref name="properties"/> by name.
+    ///
+    /// <para><paramref name="properties"/> is typically an anonymous object, e.g.
+    /// <c>new { Name = "x", Age = 30 }</c>; each of its properties is matched to a public writable property
+    /// or field of the same name on the target type, converting the value where necessary.  Pass
+    /// <see langword="null"/> to leave all members at their defaults.</para>
+    /// </summary>
+    public object NewObject(string typeFullName, object? properties = null)
+    {
+        var type = GetRewrittenType(typeFullName);
+        var instance = Activator.CreateInstance(type)!;
+        if (properties != null)
+            ApplyMembers(type, instance, properties);
+        return instance;
+    }
+
+    /// <summary>
+    /// Easy API (Phase 26): creates a <c>List&lt;T&gt;</c> of the rewritten type named
+    /// <paramref name="typeFullName"/>, one element per entry in <paramref name="rows"/>.
+    ///
+    /// <para>Each row is a property bag (typically an anonymous object) whose members are assigned by name,
+    /// e.g. <c>shims.NewList("My.QueryData", new { 車名 = "A" }, new { 車名 = "B" })</c>.  The returned list
+    /// is typed as <c>List&lt;rewritten T&gt;</c>, so it satisfies an <c>IEnumerable&lt;T&gt;</c> return
+    /// substitution in a <see cref="ReplaceMethod(Type, string, Func{object, object[], object}, Type)"/>
+    /// shim (e.g. for <c>context.Database.SqlQuery&lt;T&gt;(sql).ToList()</c>).</para>
+    /// </summary>
+    public object NewList(string typeFullName, params object[] rows)
+    {
+        var type = GetRewrittenType(typeFullName);
+        var listType = typeof(List<>).MakeGenericType(type);
+        var list = (System.Collections.IList)Activator.CreateInstance(listType)!;
+        if (rows != null)
+        {
+            foreach (var row in rows)
+            {
+                var element = Activator.CreateInstance(type)!;
+                if (row != null)
+                    ApplyMembers(type, element, row);
+                list.Add(element);
+            }
+        }
+        return list;
+    }
+
+    private static void ApplyMembers(Type targetType, object target, object propertyBag)
+    {
+        foreach (var src in propertyBag.GetType().GetProperties(BindingFlags.Public | BindingFlags.Instance))
+        {
+            var value = src.GetValue(propertyBag);
+            var name = src.Name;
+
+            var destProp = targetType.GetProperty(name, BindingFlags.Public | BindingFlags.Instance);
+            if (destProp != null && destProp.CanWrite)
+            {
+                destProp.SetValue(target, ConvertMemberValue(value, destProp.PropertyType, targetType, name));
+                continue;
+            }
+
+            var destField = targetType.GetField(name, BindingFlags.Public | BindingFlags.Instance);
+            if (destField != null)
+            {
+                destField.SetValue(target, ConvertMemberValue(value, destField.FieldType, targetType, name));
+                continue;
+            }
+
+            throw new InvalidOperationException(
+                "NewObject/NewList: the rewritten type '" + (targetType.FullName ?? targetType.Name) +
+                "' has no writable public property or field named '" + name + "'.");
+        }
+    }
+
+    private static object? ConvertMemberValue(object? value, Type targetMemberType, Type targetType, string memberName)
+    {
+        if (value == null)
+            return null;
+
+        var valueType = value.GetType();
+        if (targetMemberType.IsAssignableFrom(valueType))
+            return value;
+
+        var underlying = Nullable.GetUnderlyingType(targetMemberType) ?? targetMemberType;
+        try
+        {
+            if (underlying.IsEnum)
+                return Enum.ToObject(underlying, value);
+            return Convert.ChangeType(value, underlying);
+        }
+        catch (Exception ex) when (ex is InvalidCastException or FormatException or OverflowException or ArgumentException)
+        {
+            throw new InvalidOperationException(
+                "NewObject/NewList: cannot assign a value of type '" + (valueType.FullName ?? valueType.Name) +
+                "' to member '" + memberName + "' of type '" + (targetMemberType.FullName ?? targetMemberType.Name) +
+                "' on '" + (targetType.FullName ?? targetType.Name) + "'.", ex);
+        }
+    }
+
+    /// <summary>
     /// Invokes a public instance method on <paramref name="instance"/> via reflection and returns
     /// the result cast to <typeparamref name="TResult"/>.
     /// </summary>

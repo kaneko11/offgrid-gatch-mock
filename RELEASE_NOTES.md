@@ -22,6 +22,24 @@
 
 > **⚠️ EXPERIMENTAL / TEST-ONLY。API は予告なく変更されます。production への組み込み不可。**
 
+### 0.1.0-alpha.8
+
+- method shim の canned 戻り値を組み立てるためのヘルパーを追加（Phase 26、`Shims` に追加・後方互換）。
+  - `GetRewrittenType(typeFullName)`: 書き換え後アセンブリから型を名前で解決。shim delegate 内で
+    canned データの「書き換え後の型」を得るのに使う（同名の元型は load context が違い割り当て不可のため）。
+  - `NewObject(typeFullName, properties?)`: 書き換え後の型のインスタンスを生成し、匿名オブジェクト
+    （例 `new { 車名 = "A", 車体番号 = 1234 }`）のメンバを**名前一致**で代入。値は必要に応じて変換。
+  - `NewList(typeFullName, params rows)`: 各 row（プロパティバッグ）から1要素ずつ作り、
+    `List<書き換え後の型>` を返す。`ReplaceMethod` の `IEnumerable<T>` 戻り値差し替えにそのまま使える
+    （例: `context.Database.SqlQuery<T>(sql).ToList()`）。
+- これにより method shim の delegate が
+  `(recv, args) => shims.NewList("My.QueryData", new { 車名 = "A" })` のように1行で書ける。
+  - 注意: delegate 内で `shims` を参照するため、`shims` は `using (var shims = ...)` の初期化子内では
+    なく**先に宣言**してから `ReplaceMethod` を登録する（C# のローカル変数の制約）。
+- public API の破壊的変更なし（追加のみ）。
+
+対象フレームワーク: `net8.0`, `net48`。XML ドキュメント・シンボル（snupkg）同梱。依存: `Mono.Cecil`。
+
 ### 0.1.0-alpha.7
 
 - インスタンスメソッドの call-site 差し替え（method shim）を追加（Phase 25）。
