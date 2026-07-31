@@ -625,6 +625,64 @@ using (var shims = Shims.ForAssembly(targetAssemblyPath)
 ジェネリックメソッドも差し替え可能**です（subclass override 不可なメソッドが対象）。declaring 型の
 アセンブリは書き換えません。
 
+> **⚠️ `WithStatic(...)` + `Static<T>(...)` と同じ session で併用する場合の順序制約**
+>
+> **`ReplaceMethod(...)` / `ReplaceNew(...)` は、必ず `Static<T>(...)` より "先" に書いてください。**
+> 逆にすると、`CreateObject`/`Invoke` を一度も呼んでいない段階でも、次のエラーになります。
+>
+> ```
+> System.InvalidOperationException: ReplaceNew(...) failed: rewrite already completed.
+> target cannot be added after rewrite.
+> ```
+>
+> **なぜこの順序が必要か:**
+> `WithStatic(type)` は「この型の static メソッドを差し替え対象にする」という"登録"だけを行い、
+> セッションを確定（finalize）させません。一方で `Static<T>(declaringType, methodName)` は、
+> 実際に「戻り値をこう設定する」という**設定を行うメソッド**ですが、内部実装として
+> 呼び出された瞬間に `EnsureFinalized()` を実行し、**その場でアセンブリの書き換え・ロードを
+> 確定させてしまいます**。エラーメッセージは「`CreateObject`/`Invoke` の後に追加するとダメ」と
+> 説明していますが、実際には `Static<T>(...)` 自体が `CreateObject` と同じ「確定」処理を
+> こっそり引き起こしているため、`CreateObject` を1回も呼んでいなくても発生します。
+>
+> つまり、同じセッション内でのメソッドの役割は以下のようになっています:
+>
+> | メソッド | 役割 | セッションを確定させるか |
+> |---|---|---|
+> | `WithStatic(type)` | 差し替え対象の"登録"のみ | させない |
+> | `ReplaceMethod(...)` / `ReplaceNew(...)` | インスタンスメソッド差し替えの"登録"のみ | させない（ただし確定後は使えない） |
+> | `Static<T>(...)` | 実際の戻り値の"設定"を行う | **させる（`EnsureFinalized()` が呼ばれる）** |
+>
+> **具体例（順序による違い）:**
+>
+> ```csharp
+> // ✅ 正しい順序: ReplaceMethod → Static<T> → CreateObject
+> using (var shims = Shims.ForAssembly(targetAssemblyPath).WithStatic(typeof(StaticClock)))
+> {
+>     // ① まず ReplaceMethod(・ReplaceNew)をすべて書く
+>     shims.ReplaceMethod(externalAssemblyPath, "ExternalLib.ExternalGateway", "GetName",
+>         (receiver, args) => "fake-" + args[0]);
+>
+>     // ② その後で Static<T> を書く(ここでセッションが確定するが、①は既に登録済みなので問題ない)
+>     shims.Static<string>(typeof(StaticClock), "GetName", typeof(int))
+>          .Returns("fake-clock");
+>
+>     // ③ 最後に CreateObject / Invoke
+>     var service = shims.CreateObject(...);
+> }
+>
+> // ❌ 誤った順序: Static<T> → ReplaceMethod
+> using (var shims = Shims.ForAssembly(targetAssemblyPath).WithStatic(typeof(StaticClock)))
+> {
+>     shims.Static<string>(typeof(StaticClock), "GetName", typeof(int))
+>          .Returns("fake-clock");            // ← この時点でセッションが確定してしまう
+>
+>     shims.ReplaceMethod(...);                // ← 「もう確定済みだから追加できない」とここで失敗する
+> }
+> ```
+>
+> **覚え方:** セッション内では、常に「登録系のメソッド（`WithStatic` / `ReplaceMethod` / `ReplaceNew`）を
+> 全部先に書き切ってから、`Static<T>(...)` を書き、最後に `CreateObject`/`Invoke` を呼ぶ」という順番を守ってください。
+
 **対象コード（テスト対象の製品コード。これは変更しない）** — `GatewayUserService` 内の
 `ExternalGateway` 呼び出しが差し替え対象です:
 
