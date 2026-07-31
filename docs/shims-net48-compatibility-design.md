@@ -1246,3 +1246,74 @@ public sealed class Net48MethodShimSample
 - 戻り値型の差し替えは「直後に interface として消費される」場合のみ。
 - declaring 型・要素型のアセンブリ（rewrite 対象でないもの）は parent から共有される（既存の AssemblyResolve 経由）。
 - BCL 宣言型メソッドは未対応。`[assembly: DoNotParallelize]` 必須。
+
+---
+
+## 21. Phase 25 — Type-Safe Method Replacement API / Signature Validation
+
+`MethodInfo` ベースの型安全 API、Type / generic target + exact parameter types、
+void 専用 API、wrapper の戻り値検証は net8.0 / net48 共通実装です。net48 消費側テストは
+`LangVersion=7.3` のままコンパイル・実行します。
+
+### 21.1 net48 / C# 7.3 sample
+
+```csharp
+using System;
+using System.Reflection;
+using ExternalLib;
+using MiniMockito.Shims.Experimental;
+
+MethodInfo method = typeof(ExternalTableLoader).GetMethod(
+    "Load",
+    new[]
+    {
+        typeof(object),
+        typeof(string),
+        typeof(bool)
+    });
+
+using (Shims shims = Shims.ForAssembly(targetAssemblyPath))
+{
+    shims.ReplaceMethod<int>(method)
+         .Returns(0);
+
+    object service = shims.CreateObject(
+        "TargetApp.ConstructorCallsIntMethod");
+
+    Assert.AreEqual(
+        true,
+        shims.GetValue<bool>(
+            service,
+            "Initialized"));
+}
+```
+
+C# 7.3 では nullable annotation、using declaration、target-typed `new` は使わず、従来の
+using statement と明示的な型を使います。public API 自体は通常の generics / delegates /
+Reflection API だけで消費できます。
+
+### 21.2 net48 でも共通の signature rule
+
+- overload は exact `MethodInfo` または全 `parameterTypes` で指定する。
+- 引数なしは `Type.EmptyTypes`。`parameterTypes = null` は推奨せず、登録時に拒否する。
+- optional parameter も `MethodInfo.GetParameters()` に含まれる。
+- `ReplaceMethod<TResult>` は `MethodInfo.ReturnType` と `TResult` の完全一致を登録時に検証する。
+- `ReplaceVoidMethod` は void のみ、戻り値あり API は non-void のみ受け付ける。
+- legacy callback が non-nullable value type に `null` を返すと
+  `ShimReturnTypeMismatchException`。generated wrapper の `unbox.any` より前に検証する。
+- virtual / non-virtual は metadata から判定し、いずれも `InstanceCallSiteRewrite` を選択する。
+- static method は既存 Static API を案内して拒否する。
+- BCL method、abstract、by-ref return、`ref` / `out` / `in`、typed generic method は初期対象外。
+
+### 21.3 net48 テスト
+
+`Net48TypeSafeMethodReplacementTests` で次を検証します。
+
+- constructor 内で戻り値を捨てる int method を `.Returns(0)` で差し替え、constructor が完了する。
+- generic target + `Type.EmptyTypes`、Type + optional parameter を含む exact signature。
+- `ReplaceVoidMethod(...).DoNothing()`。
+- legacy `null -> int` が `NullReferenceException` ではなく専用例外になる。
+
+既存の cross-assembly new interception、Easy `ReplaceNew`、inspection API、static shim、
+legacy generic method shim と同じ net48 test project で回帰確認します。x86 project は既存の
+`MiniMockito.Net48X86Tests` を継続して実行します。

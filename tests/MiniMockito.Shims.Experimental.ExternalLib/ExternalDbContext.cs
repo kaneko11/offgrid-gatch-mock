@@ -45,6 +45,11 @@ namespace ExternalLib
         {
             return "real-log";
         }
+
+        public void Write(string message)
+        {
+            throw new InvalidOperationException("Real logging");
+        }
     }
 
     /// <summary>

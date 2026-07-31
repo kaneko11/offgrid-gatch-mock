@@ -88,10 +88,10 @@ public static class ShimDispatcher
 
         var context = ShimContext.Current;
         if (context is { IsDisposed: false }
-            && context.MethodRegistry.TryGet(methodKey, out var shim)
-            && shim is not null)
+            && context.MethodRegistry.TryResolve(methodKey, args, out var rule, out _)
+            && rule is not null)
         {
-            result = shim(receiver, args);
+            result = rule.Shim(receiver, args);
             context.LastMethodShimResolved = true;
             return true;
         }
@@ -103,6 +103,249 @@ public static class ShimDispatcher
 
         result = null;
         return false;
+    }
+
+    /// <summary>
+    /// Entry point used by generated method-call wrappers. It resolves the exact overload (or a
+    /// backward-compatible legacy rule), invokes the replacement, and validates the result before
+    /// generated IL casts or unboxes it.
+    /// </summary>
+    public static bool TryInvokeMethodValidated(
+        string methodKey,
+        string methodSignature,
+        Type expectedReturnType,
+        bool isVirtual,
+        object? receiver,
+        object?[] args,
+        string callingAssembly,
+        string callingMethod,
+        out object? result)
+    {
+        ThrowHelper.ThrowIfNullOrWhiteSpace(methodKey);
+        ThrowHelper.ThrowIfNullOrWhiteSpace(methodSignature);
+        ThrowHelper.ThrowIfNull(expectedReturnType);
+        ThrowHelper.ThrowIfNull(args);
+        ThrowHelper.ThrowIfNullOrWhiteSpace(callingAssembly);
+        ThrowHelper.ThrowIfNullOrWhiteSpace(callingMethod);
+
+        var context = ShimContext.Current;
+        var targetType = GetTargetType(methodKey);
+        if (context is not { IsDisposed: false })
+        {
+            result = null;
+            return false;
+        }
+
+        if (!context.MethodRegistry.TryResolve(
+                methodKey,
+                args,
+                out var rule,
+                out var triedRules) ||
+            rule is null)
+        {
+            context.LastMethodShimResolved = false;
+            context.LastMethodDispatchDiagnostics = new MethodDispatchDiagnostics(
+                targetType,
+                methodSignature,
+                expectedReturnType,
+                isVirtual,
+                callingAssembly,
+                callingMethod,
+                replacementFound: false,
+                selectedRule: null,
+                registrationSource: null,
+                actualReturnType: null,
+                nullReturnedForNonNullableValueType: false,
+                triedRules);
+            result = null;
+            return false;
+        }
+
+        try
+        {
+            result = rule.Shim(receiver, args);
+        }
+        catch (Exception exception)
+        {
+            context.LastMethodShimResolved = true;
+            context.LastMethodDispatchDiagnostics = CreateMethodDiagnostics(
+                targetType,
+                methodSignature,
+                expectedReturnType,
+                isVirtual,
+                callingAssembly,
+                callingMethod,
+                rule,
+                triedRules,
+                actualReturnType: null,
+                nullReturnedForNonNullableValueType: false,
+                callbackException: exception);
+            throw;
+        }
+
+        var actualReturnType = result?.GetType();
+        var nullForNonNullableValueType =
+            result is null &&
+            expectedReturnType != typeof(void) &&
+            expectedReturnType.IsValueType &&
+            Nullable.GetUnderlyingType(expectedReturnType) is null;
+
+        var returnTypeMatches = ReturnTypeMatches(expectedReturnType, result);
+        context.LastMethodShimResolved = true;
+        context.LastMethodDispatchDiagnostics = CreateMethodDiagnostics(
+            targetType,
+            methodSignature,
+            expectedReturnType,
+            isVirtual,
+            callingAssembly,
+            callingMethod,
+            rule,
+            triedRules,
+            actualReturnType,
+            nullForNonNullableValueType,
+            callbackException: null);
+
+        if (!returnTypeMatches)
+        {
+            throw CreateReturnTypeMismatchException(
+                targetType,
+                methodSignature,
+                expectedReturnType,
+                result,
+                rule,
+                callingAssembly,
+                callingMethod,
+                nullForNonNullableValueType);
+        }
+
+        return true;
+    }
+
+    private static MethodDispatchDiagnostics CreateMethodDiagnostics(
+        string targetType,
+        string methodSignature,
+        Type expectedReturnType,
+        bool isVirtual,
+        string callingAssembly,
+        string callingMethod,
+        MethodShimRule rule,
+        IReadOnlyList<string> triedRules,
+        Type? actualReturnType,
+        bool nullReturnedForNonNullableValueType,
+        Exception? callbackException)
+        => new(
+            targetType,
+            methodSignature,
+            expectedReturnType,
+            isVirtual,
+            callingAssembly,
+            callingMethod,
+            replacementFound: true,
+            selectedRule: "Rule #" + rule.RegistrationOrder + ": " + rule.MethodSignature,
+            registrationSource: rule.RegistrationSource,
+            actualReturnType,
+            nullReturnedForNonNullableValueType,
+            triedRules,
+            callbackException);
+
+    private static bool ReturnTypeMatches(Type expectedReturnType, object? result)
+    {
+        if (expectedReturnType == typeof(void))
+            return true;
+
+        if (result is null)
+        {
+            return !expectedReturnType.IsValueType ||
+                   Nullable.GetUnderlyingType(expectedReturnType) is not null;
+        }
+
+        var actualType = result.GetType();
+        var nullableUnderlying = Nullable.GetUnderlyingType(expectedReturnType);
+        if (nullableUnderlying is not null)
+            return actualType == nullableUnderlying;
+        if (expectedReturnType.IsValueType)
+            return actualType == expectedReturnType;
+        return expectedReturnType.IsInstanceOfType(result);
+    }
+
+    private static ShimReturnTypeMismatchException CreateReturnTypeMismatchException(
+        string targetType,
+        string methodSignature,
+        Type expectedReturnType,
+        object? result,
+        MethodShimRule rule,
+        string callingAssembly,
+        string callingMethod,
+        bool nullForNonNullableValueType)
+    {
+        var headline = nullForNonNullableValueType
+            ? "Replacement callback returned null for a non-nullable value type."
+            : "Replacement callback returned a value that is incompatible with the method return type.";
+        var actualType = result is null
+            ? "null"
+            : MethodSignatureFormatter.FormatType(result.GetType());
+        var lines = new List<string>
+        {
+            headline,
+            string.Empty,
+            "Target type: " + targetType,
+            "Method: " + methodSignature,
+            "Expected return type: " + MethodSignatureFormatter.FormatType(expectedReturnType),
+            "Actual value: " + (result is null ? "null" : result.ToString()),
+            "Actual replacement return type: " + actualType,
+            "Registration source: " + rule.RegistrationSource,
+            "Calling assembly: " + callingAssembly,
+            "Calling method: " + callingMethod,
+            "Selected rule: Rule #" + rule.RegistrationOrder + ": " + rule.MethodSignature,
+        };
+
+        if (nullForNonNullableValueType)
+        {
+            lines.Add(string.Empty);
+            lines.Add(
+                "Return a boxed " + MethodSignatureFormatter.FormatType(expectedReturnType) +
+                " value, for example:");
+            lines.Add("(recv, args) => (object)" + GetExampleValue(expectedReturnType));
+        }
+
+        lines.Add(string.Empty);
+        lines.Add("Prefer the type-safe API:");
+        lines.Add(
+            "ReplaceMethod<" + GetFriendlyTypeName(expectedReturnType) +
+            ">(methodInfo).Returns(" + GetExampleValue(expectedReturnType) + ")");
+        return new ShimReturnTypeMismatchException(string.Join(Environment.NewLine, lines));
+    }
+
+    private static string GetTargetType(string methodKey)
+    {
+        var delimiter = methodKey.IndexOf("::", StringComparison.Ordinal);
+        return delimiter < 0 ? "<unknown>" : methodKey.Substring(0, delimiter);
+    }
+
+    private static string GetFriendlyTypeName(Type type)
+        => type == typeof(int) ? "int"
+            : type == typeof(bool) ? "bool"
+            : type == typeof(string) ? "string"
+            : MethodSignatureFormatter.FormatType(type);
+
+    private static string GetExampleValue(Type type)
+    {
+        if (type == typeof(int) || type == typeof(short) || type == typeof(long) ||
+            type == typeof(byte) || type == typeof(uint) || type == typeof(ushort) ||
+            type == typeof(ulong) || type == typeof(sbyte) || type == typeof(float) ||
+            type == typeof(double) || type == typeof(decimal))
+        {
+            return "0";
+        }
+        if (type == typeof(bool))
+            return "false";
+        if (type == typeof(char))
+            return "'\\0'";
+        if (type.IsEnum)
+            return "(" + MethodSignatureFormatter.FormatType(type) + ")0";
+        if (type.IsValueType)
+            return "default(" + GetFriendlyTypeName(type) + ")";
+        return "null";
     }
 
     private static T CreateRealInstance<T>(Type targetType)

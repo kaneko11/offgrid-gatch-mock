@@ -39,7 +39,8 @@
 | cross-assembly diagnostics（解決/登録/rewrite/skip/registry key/duplicate risk） | ✅ 対応 (Phase 21) |
 | Easy API `Shims.ForAssembly(...).ReplaceNew(...)`（複数登録 / internal・external 混在 / last stub wins） | ✅ 対応 (Phase 23) |
 | Inspection API（`GetValue<T>` / `GetCollection` / `ShimsObject` で rewritten object graph を path 検証） | ✅ 対応 (Phase 24) |
-| インスタンスメソッド呼び出しの差し替え（`ReplaceMethod` / method shim・非 virtual / ジェネリック / 戻り値 interface 差し替え） | ✅ 対応 (Phase 25) |
+| 型安全なインスタンスメソッド差し替え（exact `MethodInfo` / `ReplaceMethod<TResult>` / `ReplaceVoidMethod` / 戻り値検証） | ✅ 対応 (Phase 25) |
+| legacy method shim（名前指定 / 単一型引数 generic / 戻り値 interface 差し替え） | ⚠️ advanced API (Phase 25) |
 | ShimContext.Dispose() で確実に cleanup | ✅ 対応 |
 
 ---
@@ -53,8 +54,7 @@
 | expression-based API（`Shim.Static(() => Clock.Now())`） | ❌ 未対応 |
 | async static method | ⚠️ 動作するが十分なテストなし |
 | by-ref / out パラメータを持つ static method | ❌ 未対応 |
-| sealed class のメソッド差し替え | ❌ 未対応（v2 本体外） |
-| non-virtual method の差し替え | ❌ 未対応（v2 本体外） |
+| sealed class / non-virtual instance method の call-site 差し替え | ✅ 非 BCL の allowlist 対象（Phase 25） |
 | private method の差し替え | ❌ 未対応 |
 | production assembly の in-place rewrite | ❌ **行いません** |
 | runtime IL rewrite（起動後 patch） | ❌ 未対応 |
@@ -257,6 +257,125 @@ API:
   `CreateObject(...)` + `Invoke(...)` + inspection API を基本にします。
 
 ### 6.0d インスタンスメソッド差し替え（`ReplaceMethod`・Phase 25）
+
+#### 推奨: exact `MethodInfo` + 型安全 API
+
+メソッド名、コメント、呼び出し側が戻り値を使っているかどうかからシグネチャを推測せず、
+Reflection で実際の `MethodInfo` を取得します。次の `Load` は呼び出し側が戻り値を捨てていても
+実シグネチャでは `int` を返すため、replacement も `int` を返す必要があります。
+
+```csharp
+var method = typeof(ExternalLib.ExternalTableLoader).GetMethod(
+    "Load",
+    BindingFlags.Instance | BindingFlags.Public,
+    null,
+    new[]
+    {
+        typeof(object),
+        typeof(string),
+        typeof(bool)
+    },
+    null);
+
+Assert.IsNotNull(method);
+Assert.AreEqual(typeof(int), method.ReturnType);
+
+using (var shims = Shims.ForAssembly(targetAssemblyPath))
+{
+    shims.ReplaceMethod<int>(method)
+         .WithArguments(
+             ShimArg.Any<object>(),
+             ShimArg.Any<string>(),
+             ShimArg.Eq(true))
+         .Returns(0);
+
+    var service = shims.CreateObject(
+        "TargetApp.ConstructorCallsIntMethod");
+
+    Assert.IsTrue(
+        shims.GetValue<bool>(service, "Initialized"));
+}
+```
+
+callback は `MethodReplacementContext` から receiver と boxed arguments を参照でき、戻り値は
+`Func<MethodReplacementContext, TResult>` により型制約されます。
+
+```csharp
+string capturedSql = null;
+
+shims.ReplaceMethod<int>(method)
+     .Returns(context =>
+     {
+         capturedSql = (string)context.Arguments[1];
+         return 0;
+     });
+```
+
+Type / generic target 版でも parameter types は明示します。zero-argument method は
+`Type.EmptyTypes` を使います。
+
+```csharp
+shims.ReplaceMethod<ExternalLib.ExternalTableLoader, int>(
+         "Load",
+         typeof(object),
+         typeof(string),
+         typeof(bool))
+     .Returns(0);
+
+shims.ReplaceMethod<int>(
+         typeof(ExternalLib.ExternalTableLoader),
+         "NoArguments",
+         Type.EmptyTypes)
+     .Returns(0);
+```
+
+void 専用 API:
+
+```csharp
+shims.ReplaceVoidMethod<ExternalLib.ExternalLogger>(
+         "Write",
+         typeof(string))
+     .DoNothing();
+
+shims.ReplaceVoidMethod(writeMethodInfo)
+     .Callback(context =>
+     {
+         capturedMessage = (string)context.Arguments[0];
+     });
+```
+
+検証ルール:
+
+- `MethodInfo` または正確な `parameterTypes` が必須。overload を名前だけで選ばない。
+- optional parameter も宣言シグネチャに含める。`bool setAll = true` は3つ目の parameter。
+- `ReplaceMethod<TResult>` は戻り値型を登録時に照合し、void や不一致型を拒否する。
+- non-nullable value type に `null` を返さない。`int` なら boxed `int` になる `0` を返す。
+- static / abstract / by-ref return / `ref`・`out`・`in` は型安全 instance API の対象外。
+- virtual / non-virtual は `MethodInfo` から判定し、現在は両方とも call-site rewrite を使う。
+- matcher は parameter 数・型を登録時に検証する。no-match は元の call opcode で実メソッドへ fallback する。
+
+#### legacy untyped API
+
+以下は後方互換用の advanced API です。単一型引数 generic method の
+`returnSubstituteInterface` など既存シナリオのため残していますが、新規コードでは型安全 API を推奨します。
+
+```csharp
+// ❌ Load の実際の戻り値は int
+shims.ReplaceMethod(
+    externalAssemblyPath,
+    "ExternalLib.ExternalTableLoader",
+    "Load",
+    (receiver, args) => null,
+    null);
+
+// ✅
+shims.ReplaceMethod<int>(method).Returns(0);
+```
+
+legacy callback の結果も generated wrapper が cast / unbox する前に検証されます。`int` へ `null` を
+返した場合は `NullReferenceException` ではなく `ShimReturnTypeMismatchException` になり、
+期待型・実型、exact call-site signature、登録元、calling assembly / method、選択 rule と移行例を表示します。
+`shims.LastMethodDispatchDiagnostics` では backend・matcher 選択・fallback も確認できます。
 
 `new` / static に続く第3の差し替え。**呼び出し側 IL を書き換える**ので、**非 virtual メソッドや
 ジェネリックメソッドも差し替え**できます（subclass override 不可なメソッドが対象）。declaring 型の

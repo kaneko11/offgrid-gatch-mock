@@ -36,6 +36,43 @@ using (var shims = Shims.ForAssembly(targetAssemblyPath)
 - 同じ target type に複数回 `ReplaceNew` した場合は **last stub wins**。
 - 引数条件で fake を分けたい場合は `New<T>().WithArguments(...).Returns(...)` を使います。
 
+## 型安全な instance method 差し替え
+
+新規コードでは exact `MethodInfo` を第一推奨にします。戻り値型や引数をメソッド名・コメント・
+呼び出し方から推測せず、Reflection で確認してください。
+
+```csharp
+var method = typeof(ExternalLib.ExternalTableLoader).GetMethod(
+    "Load",
+    new[]
+    {
+        typeof(object),
+        typeof(string),
+        typeof(bool)
+    });
+
+using (var shims = Shims.ForAssembly(targetAssemblyPath))
+{
+    shims.ReplaceMethod<int>(method)
+         .WithArguments(
+             ShimArg.Any<object>(),
+             ShimArg.Any<string>(),
+             ShimArg.Eq(true))
+         .Returns(0);
+
+    var service = shims.CreateObject(
+        "TargetApp.ConstructorCallsIntMethod");
+}
+```
+
+- overload は exact `MethodInfo` または全 `parameterTypes` で指定します。
+- optional parameter もシグネチャに含めます。引数なしは `Type.EmptyTypes` を使います。
+- void は `ReplaceVoidMethod(...).DoNothing()` / `.Callback(...)` を使います。
+- `ReplaceMethod<TResult>` は reflected return type と `TResult` を登録時に照合します。
+- legacy untyped `ReplaceMethod` は後方互換用 advanced API です。
+- legacy callback が non-nullable value type に `null` を返すと、unbox 前に
+  `ShimReturnTypeMismatchException` を投げます。
+
 ## new SomeClass() の差し替え
 
 ```csharp
@@ -95,5 +132,6 @@ using (ShimContext.Create())
 - **production assembly の in-place rewrite はしません**（rewrite 済みコピーを別出力します）。
 - BCL static メソッドのモックは **未対応**（`DateTime.Now`、`File.ReadAllText` 等）。
 - generic static メソッド、expression-based API（`Shim.Static(() => Clock.Now())`）は未対応。
+- Microsoft Fakes Shim の完全互換・完全代替ではありません。
 - parallel test は不可（`[assembly: DoNotParallelize]` 必須）。
 - public API は将来変更され得ます（alpha）。

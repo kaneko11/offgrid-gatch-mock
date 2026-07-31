@@ -1,64 +1,248 @@
+using System.Reflection;
+
 namespace MiniMockito.Shims.Experimental;
 
 /// <summary>
-/// Stores instance-method shims for a single <see cref="ShimContext"/> (Phase 25).
-/// Keyed by <c>DeclaringTypeFullName::MethodName</c> so cross-assembly / cross-load-context
-/// method calls can be matched by name rather than by runtime <see cref="System.Reflection.MethodInfo"/>
-/// identity.  When the same key is registered more than once, the most recent registration wins.
+/// Stores instance-method replacement rules for one <see cref="ShimContext"/>.
+/// Exact typed rules are keyed by declaring type, method name, and parameter types. Legacy
+/// name-only rules retain their historical <c>DeclaringType::Method</c> key.
 /// </summary>
 public sealed class MethodShimRegistry
 {
-    private readonly Dictionary<string, Func<object?, object?[], object?>> _shims =
+    private readonly Dictionary<string, List<MethodShimRule>> _rules =
         new(StringComparer.Ordinal);
     private readonly object _syncRoot = new();
+    private long _nextRegistrationOrder;
 
-    /// <summary>Gets the number of registered method shims.</summary>
+    /// <summary>Gets the number of registered method replacement rules.</summary>
     public int Count
     {
-        get { lock (_syncRoot) { return _shims.Count; } }
+        get
+        {
+            lock (_syncRoot)
+            {
+                return _rules.Values.Sum(rules => rules.Count);
+            }
+        }
     }
 
-    /// <summary>Builds the registry key for a method shim.</summary>
+    /// <summary>Builds the backward-compatible name-only registry key.</summary>
     public static string MakeKey(string declaringTypeFullName, string methodName)
         => declaringTypeFullName + "::" + methodName;
 
-    /// <summary>
-    /// Registers a method shim. The shim receives the call receiver (or <see langword="null"/> for
-    /// the static-like case) and the boxed arguments, and returns the replacement result.
-    /// </summary>
-    internal void Register(string declaringTypeFullName, string methodName, Func<object?, object?[], object?> shim)
+    /// <summary>Builds an overload-safe key from exact parameter type names.</summary>
+    public static string MakeSignatureKey(
+        string declaringTypeFullName,
+        string methodName,
+        IEnumerable<string> parameterTypeNames)
+        => MakeKey(declaringTypeFullName, methodName) +
+           "(" + string.Join(",", parameterTypeNames) + ")";
+
+    internal void Register(
+        string declaringTypeFullName,
+        string methodName,
+        Func<object?, object?[], object?> shim)
     {
         ThrowHelper.ThrowIfNullOrWhiteSpace(declaringTypeFullName);
         ThrowHelper.ThrowIfNullOrWhiteSpace(methodName);
         ThrowHelper.ThrowIfNull(shim);
 
-        lock (_syncRoot)
-        {
-            _shims[MakeKey(declaringTypeFullName, methodName)] = shim; // last stub wins
-        }
+        RegisterCore(new MethodShimRule(
+            MakeKey(declaringTypeFullName, methodName),
+            method: null,
+            methodSignature: declaringTypeFullName + "." + methodName + "(<legacy name-only>)",
+            expectedReturnType: null,
+            registrationSource: "legacy untyped API",
+            shim,
+            matchers: null,
+            registrationOrder: NextRegistrationOrder()));
     }
 
-    internal bool TryGet(string key, out Func<object?, object?[], object?>? shim)
+    internal void Register(
+        MethodInfo method,
+        Func<object?, object?[], object?> shim,
+        IReadOnlyList<IShimArgumentMatcher>? matchers,
+        string registrationSource)
     {
+        ThrowHelper.ThrowIfNull(method);
+        ThrowHelper.ThrowIfNull(shim);
+        ThrowHelper.ThrowIfNullOrWhiteSpace(registrationSource);
+
+        RegisterCore(new MethodShimRule(
+            MethodSignatureFormatter.MakeRegistryKey(method),
+            method,
+            MethodSignatureFormatter.Format(method),
+            method.ReturnType,
+            registrationSource,
+            shim,
+            matchers,
+            NextRegistrationOrder()));
+    }
+
+    internal bool TryResolve(
+        string methodKey,
+        object?[] arguments,
+        out MethodShimRule? rule,
+        out IReadOnlyList<string> triedRules)
+    {
+        ThrowHelper.ThrowIfNullOrWhiteSpace(methodKey);
+        ThrowHelper.ThrowIfNull(arguments);
+
         lock (_syncRoot)
         {
-            if (_shims.TryGetValue(key, out var found))
+            var tried = new List<string>();
+
+            if (_rules.TryGetValue(methodKey, out var exactRules))
             {
-                shim = found;
+                if (TryMatch(exactRules, arguments, tried, out rule))
+                {
+                    triedRules = tried.AsReadOnly();
+                    return true;
+                }
+
+                // Exact typed rules existed but their matchers did not match. Do not unexpectedly
+                // fall through to a broader legacy rule; the wrapper must call the real method.
+                triedRules = tried.AsReadOnly();
+                return false;
+            }
+
+            var legacyKey = GetLegacyKey(methodKey);
+            if (!string.Equals(legacyKey, methodKey, StringComparison.Ordinal) &&
+                _rules.TryGetValue(legacyKey, out var legacyRules) &&
+                TryMatch(legacyRules, arguments, tried, out rule))
+            {
+                triedRules = tried.AsReadOnly();
                 return true;
             }
-        }
 
-        shim = null;
-        return false;
+            rule = null;
+            triedRules = tried.AsReadOnly();
+            return false;
+        }
     }
 
-    /// <summary>Removes all registered method shims.</summary>
+    /// <summary>Removes all registered method replacement rules.</summary>
     public void Clear()
     {
         lock (_syncRoot)
         {
-            _shims.Clear();
+            _rules.Clear();
         }
     }
+
+    private void RegisterCore(MethodShimRule rule)
+    {
+        lock (_syncRoot)
+        {
+            if (!_rules.TryGetValue(rule.Key, out var rules))
+            {
+                rules = new List<MethodShimRule>();
+                _rules[rule.Key] = rules;
+            }
+
+            rules.Add(rule);
+        }
+    }
+
+    private long NextRegistrationOrder()
+    {
+        lock (_syncRoot)
+        {
+            return ++_nextRegistrationOrder;
+        }
+    }
+
+    private static bool TryMatch(
+        List<MethodShimRule> rules,
+        object?[] arguments,
+        List<string> tried,
+        out MethodShimRule? matched)
+    {
+        for (var i = rules.Count - 1; i >= 0; i--)
+        {
+            var rule = rules[i];
+            if (rule.Matchers is null)
+            {
+                tried.Add("Rule #" + rule.RegistrationOrder + ": catch-all -> matched");
+                matched = rule;
+                return true;
+            }
+
+            if (rule.Matchers.Count != arguments.Length)
+            {
+                tried.Add(
+                    "Rule #" + rule.RegistrationOrder + ": expected " +
+                    rule.Matchers.Count + " argument(s), got " + arguments.Length);
+                continue;
+            }
+
+            var ruleMatched = true;
+            for (var argumentIndex = 0; argumentIndex < arguments.Length; argumentIndex++)
+            {
+                var matcher = rule.Matchers[argumentIndex];
+                if (matcher.Matches(arguments[argumentIndex]))
+                    continue;
+
+                tried.Add(
+                    "Rule #" + rule.RegistrationOrder + ": matcher [" + argumentIndex +
+                    "] " + matcher.Describe() + " did not match " +
+                    FormatArgument(arguments[argumentIndex]));
+                ruleMatched = false;
+                break;
+            }
+
+            if (!ruleMatched)
+                continue;
+
+            tried.Add("Rule #" + rule.RegistrationOrder + ": all matchers -> matched");
+            matched = rule;
+            return true;
+        }
+
+        matched = null;
+        return false;
+    }
+
+    private static string GetLegacyKey(string methodKey)
+    {
+        var openParen = methodKey.IndexOf('(');
+        return openParen < 0 ? methodKey : methodKey.Substring(0, openParen);
+    }
+
+    private static string FormatArgument(object? argument)
+        => argument is null
+            ? "null"
+            : argument + " (" + (argument.GetType().FullName ?? argument.GetType().Name) + ")";
+}
+
+internal sealed class MethodShimRule
+{
+    internal MethodShimRule(
+        string key,
+        MethodInfo? method,
+        string methodSignature,
+        Type? expectedReturnType,
+        string registrationSource,
+        Func<object?, object?[], object?> shim,
+        IReadOnlyList<IShimArgumentMatcher>? matchers,
+        long registrationOrder)
+    {
+        Key = key;
+        Method = method;
+        MethodSignature = methodSignature;
+        ExpectedReturnType = expectedReturnType;
+        RegistrationSource = registrationSource;
+        Shim = shim;
+        Matchers = matchers;
+        RegistrationOrder = registrationOrder;
+    }
+
+    internal string Key { get; }
+    internal MethodInfo? Method { get; }
+    internal string MethodSignature { get; }
+    internal Type? ExpectedReturnType { get; }
+    internal string RegistrationSource { get; }
+    internal Func<object?, object?[], object?> Shim { get; }
+    internal IReadOnlyList<IShimArgumentMatcher>? Matchers { get; }
+    internal long RegistrationOrder { get; }
 }

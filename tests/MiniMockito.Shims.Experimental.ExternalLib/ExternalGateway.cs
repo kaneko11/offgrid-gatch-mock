@@ -43,6 +43,38 @@ namespace ExternalLib
     }
 
     /// <summary>
+    /// Generic Phase 25 sample with an int-returning, non-virtual instance method. The optional
+    /// parameter remains part of the three-parameter runtime signature.
+    /// </summary>
+    public class ExternalTableLoader
+    {
+        public int Load(object combo, string sql, bool setAll = true)
+        {
+            throw new InvalidOperationException("Real database access");
+        }
+
+        public int Load(string name)
+        {
+            return name.Length;
+        }
+
+        public int NoArguments()
+        {
+            return 11;
+        }
+
+        public virtual int VirtualLoad(int value)
+        {
+            return value + 1;
+        }
+
+        public static int StaticLoad(string sql)
+        {
+            return sql.Length;
+        }
+    }
+
+    /// <summary>
     /// IEnumerable&lt;T&gt; implementation whose constructor is <c>internal</c> (test code cannot create it),
     /// mimicking Entity Framework's <c>DbRawSqlQuery&lt;T&gt;</c>.  Exercises return-type substitution.
     /// </summary>

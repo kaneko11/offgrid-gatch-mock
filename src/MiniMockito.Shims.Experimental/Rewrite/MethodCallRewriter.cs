@@ -5,7 +5,7 @@ namespace MiniMockito.Shims.Experimental;
 
 /// <summary>
 /// Rewrites allowlisted <b>instance method</b> call sites (Phase 25) in the target assembly to static
-/// wrapper methods that consult <see cref="ShimDispatcher.TryInvokeMethod"/> and fall back to the real
+/// wrapper methods that consult <see cref="ShimDispatcher.TryInvokeMethodValidated"/> and fall back to the real
 /// method when no shim is registered.
 /// </summary>
 /// <remarks>
@@ -35,17 +35,27 @@ public static class MethodCallRewriter
         if (options.MethodTargets.Count == 0)
             return 0;
 
-        var targets = new Dictionary<string, MethodShimTarget>(StringComparer.Ordinal);
+        var targets = new Dictionary<string, List<MethodShimTarget>>(StringComparer.Ordinal);
         foreach (var t in options.MethodTargets)
         {
-            targets[t.DeclaringTypeFullName + "|" + t.MethodName] = t;
-            diagnostics.Add($"Method shim target registered: {t.DeclaringTypeFullName}::{t.MethodName}.");
+            var key = t.DeclaringTypeFullName + "|" + t.MethodName;
+            if (!targets.TryGetValue(key, out var overloadTargets))
+            {
+                overloadTargets = new List<MethodShimTarget>();
+                targets[key] = overloadTargets;
+            }
+            overloadTargets.Add(t);
+            diagnostics.Add(
+                "Method shim target registered: " + t.MethodSignature +
+                " (source: " + t.RegistrationSource + ").");
         }
 
-        var tryInvoke = typeof(ShimDispatcher).GetMethod(nameof(ShimDispatcher.TryInvokeMethod));
+        var tryInvoke = typeof(ShimDispatcher).GetMethod(nameof(ShimDispatcher.TryInvokeMethodValidated));
         if (tryInvoke is null)
-            throw new ShimRewriteException("ShimDispatcher.TryInvokeMethod(...) could not be found.");
+            throw new ShimRewriteException("ShimDispatcher.TryInvokeMethodValidated(...) could not be found.");
         var importedTryInvoke = module.ImportReference(tryInvoke);
+        var getTypeFromHandle = module.ImportReference(
+            typeof(Type).GetMethod(nameof(Type.GetTypeFromHandle))!);
 
         var objectType = module.ImportReference(typeof(object));
         var objectArrayType = new ArrayType(objectType);
@@ -71,7 +81,10 @@ public static class MethodCallRewriter
                     continue;
 
                 var declName = RemoveGenericArity(callee.DeclaringType.FullName);
-                if (!targets.TryGetValue(declName + "|" + callee.Name, out var target))
+                if (!targets.TryGetValue(declName + "|" + callee.Name, out var overloadTargets))
+                    continue;
+                var target = FindTarget(callee, overloadTargets);
+                if (target is null)
                     continue;
 
                 var site = $"{method.DeclaringType.FullName}.{method.Name} IL_{instruction.Offset:X4}: {declName}::{callee.Name}";
@@ -83,16 +96,63 @@ public static class MethodCallRewriter
 
                 var wrapper = GetOrCreateWrapper(
                     module, wrapperClass, wrapperCache, callee, target, typeArgument,
-                    importedTryInvoke, objectType, objectArrayType, declName);
+                    importedTryInvoke, getTypeFromHandle, objectType, objectArrayType, declName,
+                    instruction.OpCode, method);
 
                 instruction.OpCode = OpCodes.Call;
                 instruction.Operand = wrapper;
                 rewritten++;
-                diagnostics.Add($"Method call site rewritten: {site} -> ShimDispatcher.TryInvokeMethod.");
+                diagnostics.Add($"Method call site rewritten: {site} -> ShimDispatcher.TryInvokeMethodValidated.");
             }
         }
 
         return rewritten;
+    }
+
+    private static MethodShimTarget? FindTarget(
+        MethodReference callee,
+        IReadOnlyList<MethodShimTarget> candidates)
+    {
+        var actualParameters = callee.Parameters
+            .Select(parameter => FormatCecilType(parameter.ParameterType))
+            .ToArray();
+
+        for (var i = candidates.Count - 1; i >= 0; i--)
+        {
+            var candidate = candidates[i];
+            if (candidate.ParameterTypeNames is null ||
+                candidate.ParameterTypeNames.Count != actualParameters.Length)
+            {
+                continue;
+            }
+
+            var matches = true;
+            for (var parameterIndex = 0; parameterIndex < actualParameters.Length; parameterIndex++)
+            {
+                if (string.Equals(
+                        candidate.ParameterTypeNames[parameterIndex],
+                        actualParameters[parameterIndex],
+                        StringComparison.Ordinal))
+                {
+                    continue;
+                }
+
+                matches = false;
+                break;
+            }
+
+            if (matches)
+                return candidate;
+        }
+
+        // Preserve the advanced legacy API's historical name-only matching behavior.
+        for (var i = candidates.Count - 1; i >= 0; i--)
+        {
+            if (!candidates[i].HasExactSignature)
+                return candidates[i];
+        }
+
+        return null;
     }
 
     private static bool ValidateCallee(
@@ -105,6 +165,27 @@ public static class MethodCallRewriter
         out TypeReference? typeArgument)
     {
         typeArgument = null;
+
+        if (target.HasExactSignature)
+        {
+            var actualReturnType = FormatCecilType(callee.ReturnType);
+            if (!string.Equals(target.ReturnTypeName, actualReturnType, StringComparison.Ordinal))
+            {
+                diagnostics.Add(
+                    "Method call site skipped: " + site +
+                    ". Skipped reason: exact return type mismatch. Requested " +
+                    target.ReturnTypeName + ", call site has " + actualReturnType + ".");
+                return false;
+            }
+
+            if (callee is GenericInstanceMethod || callee.HasGenericParameters)
+            {
+                diagnostics.Add(
+                    "Method call site skipped: " + site +
+                    ". Skipped reason: generic methods are not supported by the type-safe API.");
+                return false;
+            }
+        }
 
         // BCL declaring types are out of scope.
         var scope = callee.DeclaringType.Scope?.Name;
@@ -170,12 +251,17 @@ public static class MethodCallRewriter
         MethodShimTarget target,
         TypeReference? typeArgument,
         MethodReference importedTryInvoke,
+        MethodReference getTypeFromHandle,
         TypeReference objectType,
         ArrayType objectArrayType,
-        string declName)
+        string declName,
+        OpCode fallbackCallOpCode,
+        MethodDefinition callingMethod)
     {
         var isGeneric = typeArgument is not null;
-        var cacheKey = declName + "::" + callee.Name + (isGeneric ? "<" + typeArgument!.FullName + ">" : string.Empty);
+        var cacheKey =
+            callee.FullName + "|" + target.RegistryKey + "|" + fallbackCallOpCode.Code +
+            (isGeneric ? "<" + typeArgument!.FullName + ">" : string.Empty);
         if (cache.TryGetValue(cacheKey, out var existing))
             return existing;
 
@@ -200,7 +286,9 @@ public static class MethodCallRewriter
         }
 
         var receiverType = module.ImportReference(callee.DeclaringType);
-        var wrapperName = "__Shims_Call_" + Sanitize(declName) + "_" + callee.Name + (isGeneric ? "_" + Sanitize(typeArgument!.Name) : string.Empty);
+        var wrapperName =
+            "__Shims_Call_" + Sanitize(declName) + "_" + callee.Name + "_" + cache.Count +
+            (isGeneric ? "_" + Sanitize(typeArgument!.Name) : string.Empty);
 
         var wrapper = new MethodDefinition(
             wrapperName,
@@ -240,12 +328,24 @@ public static class MethodCallRewriter
             il.Emit(OpCodes.Stelem_Ref);
         }
 
-        // ShimDispatcher.TryInvokeMethod(key, receiver, args, out result)
-        il.Emit(OpCodes.Ldstr, declName + "::" + callee.Name);
+        // ShimDispatcher.TryInvokeMethodValidated(
+        //     key, signature, expectedReturnType, virtuality, receiver, args,
+        //     callingAssembly, callingMethod, out result)
+        il.Emit(OpCodes.Ldstr, target.RegistryKey);
+        il.Emit(OpCodes.Ldstr, target.HasExactSignature
+            ? target.MethodSignature
+            : FormatCallSiteSignature(callee));
+        il.Emit(OpCodes.Ldtoken, returnType);
+        il.Emit(OpCodes.Call, getTypeFromHandle);
+        EmitLdcI4(il, IsVirtual(callee, target) ? 1 : 0);
         il.Emit(OpCodes.Ldarg, wrapper.Parameters[0]);
         if (IsValueType(receiverType))
             il.Emit(OpCodes.Box, receiverType);
         il.Emit(OpCodes.Ldloc, argsVar);
+        il.Emit(OpCodes.Ldstr, module.Assembly.Name.Name);
+        il.Emit(
+            OpCodes.Ldstr,
+            callingMethod.DeclaringType.FullName + "." + callingMethod.Name);
         il.Emit(OpCodes.Ldloca_S, resultVar);
         il.Emit(OpCodes.Call, importedTryInvoke);
 
@@ -267,7 +367,7 @@ public static class MethodCallRewriter
         il.Append(fallbackFirst); // ldarg receiver
         for (var i = 0; i < paramCount; i++)
             il.Emit(OpCodes.Ldarg, wrapper.Parameters[i + 1]);
-        il.Emit(OpCodes.Callvirt, module.ImportReference(callee));
+        il.Emit(fallbackCallOpCode, module.ImportReference(callee));
         il.Emit(OpCodes.Ret);
 
         wrapperClass.Methods.Add(wrapper);
@@ -287,6 +387,49 @@ public static class MethodCallRewriter
         {
             return false;
         }
+    }
+
+    private static bool IsVirtual(MethodReference callee, MethodShimTarget target)
+    {
+        if (target.IsVirtual.HasValue)
+            return target.IsVirtual.Value;
+        try
+        {
+            return callee.Resolve()?.IsVirtual == true;
+        }
+        catch
+        {
+            return false;
+        }
+    }
+
+    private static string FormatCallSiteSignature(MethodReference callee)
+        => FormatCecilType(callee.ReturnType) + " " +
+           RemoveGenericArity(callee.DeclaringType.FullName) + "." +
+           callee.Name + "(" +
+           string.Join(
+               ", ",
+               callee.Parameters.Select(parameter => FormatCecilType(parameter.ParameterType))) +
+           ")";
+
+    private static string FormatCecilType(TypeReference type)
+    {
+        if (type is ByReferenceType byReference)
+            return FormatCecilType(byReference.ElementType) + "&";
+        if (type is PointerType pointer)
+            return FormatCecilType(pointer.ElementType) + "*";
+        if (type is ArrayType array)
+            return FormatCecilType(array.ElementType) +
+                   "[" + new string(',', array.Rank - 1) + "]";
+        if (type is GenericParameter)
+            return type.Name;
+        if (type is GenericInstanceType generic)
+        {
+            return generic.ElementType.FullName.Replace('+', '/') + "<" +
+                   string.Join(", ", generic.GenericArguments.Select(FormatCecilType)) + ">";
+        }
+
+        return type.FullName.Replace('+', '/');
     }
 
     private static string Sanitize(string name)

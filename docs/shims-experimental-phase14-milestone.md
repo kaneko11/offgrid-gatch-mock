@@ -764,3 +764,72 @@ override 不可なメソッドも対象）。declaring 型のアセンブリ（�
   `Database` 型・`SqlQuery` メソッドを method target にして `returnSubstituteInterface = typeof(IEnumerable<>)` を
   指定すれば**理論上差し替え可能**（生 SQL を実行せず canned データを返す）。`DbRawSqlQuery<T>` をローカルに格納
   する形は対象外。BCL static（`DateTime.Now` 等）は引き続き未対応。
+
+---
+
+## Phase 25 — Type-Safe Method Replacement API / Signature Validation（hardening）
+
+### 目的
+
+従来の name-only / `Func<object, object[], object>` API では、呼び出し側が戻り値を捨てている
+`int` method を void と誤認し、callback が `null` を返すと generated wrapper の `unbox.any int`
+で `NullReferenceException` になっていました。本追記では、コメントや呼び出し方ではなく実際の
+`MethodInfo` を唯一のシグネチャ情報として登録・rewrite・dispatch を行います。
+
+### 追加 API
+
+| API / 型 | 内容 |
+|---|---|
+| `ReplaceMethod<TResult>(MethodInfo)` | exact method + typed return |
+| `ReplaceMethod<TResult>(Type, name, parameterTypes)` | Type から exact overload を解決 |
+| `ReplaceMethod<TTarget, TResult>(name, parameterTypes)` | compile-time target 型版 |
+| `ReplaceVoidMethod(...)` | void 専用。`DoNothing` / `Callback` / `Throws` |
+| `TypedMethodReplacementBuilder<TResult>` | `WithArguments` / typed `Returns` / `Throws` |
+| `MethodReplacementContext` | exact `MethodInfo` / receiver / boxed arguments |
+| `ShimMethodSignatureException` | 解決・static/void/return type 等の登録時エラー |
+| `ShimReturnTypeMismatchException` | callback 結果と wrapper return type の不一致 |
+| `MethodDispatchDiagnostics` | exact signature / backend / rule / return type / fallback |
+
+### 実装方式
+
+- Type 版は `BindingFlags.Instance | Static | Public | NonPublic | FlattenHierarchy` で候補を列挙し、
+  parameter count / parameter type の完全一致で1件だけ選ぶ。名前だけで先頭候補を選ばない。
+- typed API は public・instance・non-abstract・non-generic method を対象とし、static、by-ref return、
+  `ref` / `out` / `in`、pointer を登録時に診断する。
+- `MethodInfo.ReturnType` と `typeof(TResult)` は完全一致。void は `ReplaceVoidMethod` へ分離する。
+- exact registry key は `DeclaringType::Method(parameter-type-list)`。wrapper cache key に callee の
+  full signature と元の `call` / `callvirt` opcode を含め、overload 間で wrapper を共有しない。
+- virtual / non-virtual は `MethodInfo.IsVirtual` から判定。現在の Shims session は実インスタンスの
+  caller を rewrite するため、両方とも `InstanceCallSiteRewrite` backend を使う。
+- dispatcher は callback 結果を wrapper が cast / unbox する前に検証する。non-nullable value type
+  への `null`、不正な boxed value、reference type の非 assignable value は
+  `ShimReturnTypeMismatchException`。
+- exact matcher rule が no-match の場合は legacy catch-all へ流さず、元の call opcode で実メソッドへ
+  fallback する。
+- legacy name-only API は削除・変更せず advanced API として維持。単一型引数 generic method /
+  return interface substitution の既存経路も維持する。
+
+### 診断
+
+登録・dispatch の診断には target type、exact MethodInfo signature、return / parameter types、
+instance / static、virtual / non-virtual、selected backend、expected / actual return type、
+null for non-nullable value type、candidate overloads、registration source、calling assembly /
+method、selected rule、fallback を含めます。
+
+### 追加テスト
+
+- net8: `TypeSafeMethodReplacementTests`
+  - MethodInfo / Type / generic target、callback、constructor 内 int call、ignored return
+  - void 分離、overload、`Type.EmptyTypes`、optional parameter、virtuality、static rejection
+  - Any / Eq / Is / `ShimCaptor`、`Throws`、typed no-match fallback
+  - legacy `null -> int` の専用例外と diagnostics
+- net48 / C# 7.3: `Net48TypeSafeMethodReplacementTests`
+  - constructor 内 int call、generic target、zero args、void、optional parameter、legacy null guard
+- 既存 suite により newobj、static、cross-assembly new、Easy `ReplaceNew`、inspection、
+  legacy generic method、MiniMockito 本体を回帰確認する。
+
+### 対象外
+
+BCL method interception、DbContext 専用処理、sealed external class proxy、production assembly
+in-place rewrite、runtime IL rewrite、CLR Profiling API、detour / method patching、Microsoft Fakes
+完全互換、全 instance method interception の全面再設計、source generator API は対象外です。

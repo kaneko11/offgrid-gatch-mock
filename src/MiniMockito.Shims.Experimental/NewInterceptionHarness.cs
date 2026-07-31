@@ -1,5 +1,7 @@
 ﻿using System.Reflection;
 
+using System.Runtime.ExceptionServices;
+
 namespace MiniMockito.Shims.Experimental;
 
 /// <summary>
@@ -249,6 +251,51 @@ public sealed class NewInterceptionHarness : IDisposable
     }
 
     /// <summary>
+    /// Adds one exact, overload-safe instance-method call-site target resolved from
+    /// <paramref name="method"/>. This is the preferred method-target declaration.
+    /// </summary>
+    public NewInterceptionHarness WithMethodTarget(MethodInfo method)
+    {
+        ThrowHelper.ThrowIfDisposed(_disposed, this);
+        var descriptor = MethodReplacementValidator.ValidateInstanceMethod(method, "typed API");
+        var declaringType = descriptor.Method.DeclaringType!;
+        var fullName = declaringType.FullName!.Replace('+', '/');
+        var parameterTypeNames = descriptor.Method
+            .GetParameters()
+            .Select(parameter => MethodSignatureFormatter.FormatType(parameter.ParameterType))
+            .ToArray();
+
+        _methodTargets.Add(new MethodTargetEntry(
+            fullName,
+            descriptor.Method.Name,
+            returnSubstituteInterface: null,
+            declaringType.Assembly.GetName().Name ?? string.Empty,
+            parameterTypeNames,
+            descriptor.RegistryKey,
+            descriptor.Signature,
+            MethodSignatureFormatter.FormatType(descriptor.Method.ReturnType),
+            descriptor.Method.IsVirtual,
+            descriptor.RegistrationSource));
+
+        Diag("Method target registered:");
+        Diag("  Target type: " + fullName);
+        Diag("  Exact MethodInfo signature: " + descriptor.Signature);
+        Diag("  Return type: " + MethodSignatureFormatter.FormatType(descriptor.Method.ReturnType));
+        Diag("  Parameter types: " + MethodSignatureFormatter.FormatRequestedParameterTypes(
+            descriptor.Method.GetParameters().Select(parameter => parameter.ParameterType)));
+        Diag("  Instance / static: instance");
+        Diag("  Virtual / non-virtual: " + (descriptor.Method.IsVirtual ? "virtual" : "non-virtual"));
+        Diag(
+            "  Final: " + descriptor.Method.IsFinal +
+            (descriptor.Method.IsVirtual && descriptor.Method.IsFinal
+                ? " (override is unavailable; call-site rewrite remains selected)"
+                : string.Empty));
+        Diag("  Selected backend: " + descriptor.Backend);
+        Diag("  Registration source: " + descriptor.RegistrationSource);
+        return this;
+    }
+
+    /// <summary>
     /// Adds an instance-method call-site target by external assembly path + type full name (Phase 25),
     /// without a compile-time reference to the declaring type.
     /// </summary>
@@ -304,7 +351,17 @@ public sealed class NewInterceptionHarness : IDisposable
                 ExternalTargetTypes = _externalTargets.Select(t => t.OriginalType).ToArray(),
                 StaticTargetTypes = _staticTargetTypes.ToArray(),
                 MethodTargets = _methodTargets
-                    .Select(e => new MethodShimTarget(e.DeclaringTypeFullName, e.MethodName, e.ReturnSubstituteInterface, e.AssemblySimpleName))
+                    .Select(e => new MethodShimTarget(
+                        e.DeclaringTypeFullName,
+                        e.MethodName,
+                        e.ReturnSubstituteInterface,
+                        e.AssemblySimpleName,
+                        e.ParameterTypeNames,
+                        e.RegistryKey,
+                        e.MethodSignature,
+                        e.ReturnTypeName,
+                        e.IsVirtual,
+                        e.RegistrationSource))
                     .ToArray(),
             });
 
@@ -340,7 +397,7 @@ public sealed class NewInterceptionHarness : IDisposable
         ThrowHelper.ThrowIfDisposed(_disposed, this);
         EnsureRewritten();
         var type = GetRewrittenType(typeof(TService));
-        return Activator.CreateInstance(type)
+        return CreateInstanceUnwrapped(type)
             ?? throw new InvalidOperationException(
                 $"Activator.CreateInstance returned null for {typeof(TService).FullName}.");
     }
@@ -358,7 +415,7 @@ public sealed class NewInterceptionHarness : IDisposable
         EnsureRewritten();
 
         var type = _assembly!.GetType(typeName, throwOnError: true)!;
-        return Activator.CreateInstance(type)
+        return CreateInstanceUnwrapped(type)
             ?? throw new InvalidOperationException(
                 $"Activator.CreateInstance returned null for {typeName}.");
     }
@@ -599,6 +656,25 @@ public sealed class NewInterceptionHarness : IDisposable
         Diag($"Method shim registered: {declaringTypeFullName}::{methodName}.");
     }
 
+    internal void RegisterMethodShim(
+        MethodInfo method,
+        Func<object?, object?[], object?> shim,
+        IReadOnlyList<IShimArgumentMatcher>? matchers,
+        string registrationSource)
+    {
+        ThrowHelper.ThrowIfDisposed(_disposed, this);
+        ThrowHelper.ThrowIfNull(method);
+        ThrowHelper.ThrowIfNull(shim);
+        ThrowHelper.ThrowIfNullOrWhiteSpace(registrationSource);
+        EnsureRewritten();
+
+        var context = ShimContext.RequireCurrent();
+        context.EnsureActive();
+        context.MethodRegistry.Register(method, shim, matchers, registrationSource);
+        Diag("Method shim registered: " + MethodSignatureFormatter.Format(method) + ".");
+        Diag("  Registration source: " + registrationSource);
+    }
+
     /// <summary>
     /// Registers a shim rule with optional argument matchers for <typeparamref name="TTarget"/>
     /// in the active <see cref="ShimContext"/>.
@@ -712,18 +788,42 @@ public sealed class NewInterceptionHarness : IDisposable
 
     private sealed class MethodTargetEntry
     {
-        public MethodTargetEntry(string declaringTypeFullName, string methodName, Type? returnSubstituteInterface, string assemblySimpleName)
+        public MethodTargetEntry(
+            string declaringTypeFullName,
+            string methodName,
+            Type? returnSubstituteInterface,
+            string assemblySimpleName,
+            IReadOnlyList<string>? parameterTypeNames = null,
+            string? registryKey = null,
+            string? methodSignature = null,
+            string? returnTypeName = null,
+            bool? isVirtual = null,
+            string registrationSource = "legacy untyped API")
         {
             DeclaringTypeFullName = declaringTypeFullName;
             MethodName = methodName;
             ReturnSubstituteInterface = returnSubstituteInterface;
             AssemblySimpleName = assemblySimpleName;
+            ParameterTypeNames = parameterTypeNames;
+            RegistryKey = registryKey ??
+                MethodShimRegistry.MakeKey(declaringTypeFullName, methodName);
+            MethodSignature = methodSignature ??
+                declaringTypeFullName + "." + methodName + "(<legacy name-only>)";
+            ReturnTypeName = returnTypeName;
+            IsVirtual = isVirtual;
+            RegistrationSource = registrationSource;
         }
 
         public string DeclaringTypeFullName { get; }
         public string MethodName { get; }
         public Type? ReturnSubstituteInterface { get; }
         public string AssemblySimpleName { get; }
+        public IReadOnlyList<string>? ParameterTypeNames { get; }
+        public string RegistryKey { get; }
+        public string MethodSignature { get; }
+        public string? ReturnTypeName { get; }
+        public bool? IsVirtual { get; }
+        public string RegistrationSource { get; }
     }
 
     /// <summary>
@@ -742,8 +842,29 @@ public sealed class NewInterceptionHarness : IDisposable
             ?? throw new InvalidOperationException(
                 $"Public instance method '{methodName}' was not found on {instance.GetType().FullName}.");
 
-        var result = method.Invoke(instance, args);
-        return (TResult)result!;
+        try
+        {
+            var result = method.Invoke(instance, args);
+            return (TResult)result!;
+        }
+        catch (TargetInvocationException exception) when (exception.InnerException is ShimException)
+        {
+            ExceptionDispatchInfo.Capture(exception.InnerException).Throw();
+            throw;
+        }
+    }
+
+    private static object? CreateInstanceUnwrapped(Type type)
+    {
+        try
+        {
+            return Activator.CreateInstance(type);
+        }
+        catch (TargetInvocationException exception) when (exception.InnerException is ShimException)
+        {
+            ExceptionDispatchInfo.Capture(exception.InnerException).Throw();
+            throw;
+        }
     }
 
     /// <summary>

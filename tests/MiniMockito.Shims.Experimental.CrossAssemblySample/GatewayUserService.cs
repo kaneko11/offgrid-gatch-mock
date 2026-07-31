@@ -41,6 +41,52 @@ namespace CrossAssemblySample
     }
 
     /// <summary>
+    /// Constructor sample proving that an ignored int result must still be returned with the exact
+    /// runtime type by the generated wrapper.
+    /// </summary>
+    public class ConstructorCallsIntMethod
+    {
+        public bool Initialized { get; private set; }
+
+        public ConstructorCallsIntMethod()
+        {
+            var loader = new ExternalTableLoader();
+            loader.Load(new object(), "SELECT * FROM Items", true);
+            Initialized = true;
+        }
+    }
+
+    /// <summary>Additional exact-signature call sites used by the type-safe API tests.</summary>
+    public class TypedMethodCaller
+    {
+        public int CallLoad(string sql, bool setAll)
+        {
+            return new ExternalTableLoader().Load(new object(), sql, setAll);
+        }
+
+        public int CallSingleArgumentOverload(string name)
+        {
+            return new ExternalTableLoader().Load(name);
+        }
+
+        public int CallNoArguments()
+        {
+            return new ExternalTableLoader().NoArguments();
+        }
+
+        public int CallVirtual(int value)
+        {
+            return new ExternalTableLoader().VirtualLoad(value);
+        }
+
+        public string CallLogger(string message)
+        {
+            new ExternalLogger().Write(message);
+            return "completed";
+        }
+    }
+
+    /// <summary>
     /// 書き換え対象アセンブリ側に定義した、可変プロパティを持つ DTO。
     /// shims.NewObject / NewList が匿名オブジェクトのメンバを名前一致で流し込む対象。
     /// </summary>

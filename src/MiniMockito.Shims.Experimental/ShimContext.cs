@@ -83,6 +83,12 @@ public sealed class ShimContext : IDisposable
     /// </summary>
     public bool? LastMethodShimResolved { get; internal set; }
 
+    /// <summary>
+    /// Gets exact signature, selected rule/backend, return validation, and fallback diagnostics for
+    /// the most recent rewritten instance-method dispatch.
+    /// </summary>
+    public MethodDispatchDiagnostics? LastMethodDispatchDiagnostics { get; internal set; }
+
     internal bool IsDisposed => _disposed;
 
     internal static ShimContext? Current => CurrentContext.Value;

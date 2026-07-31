@@ -3,6 +3,7 @@ using System.Collections.Generic;
 using System.IO;
 using System.Linq;
 using System.Reflection;
+using System.Runtime.ExceptionServices;
 
 namespace MiniMockito.Shims.Experimental;
 
@@ -203,8 +204,9 @@ public sealed class Shims : IDisposable
     }
 
     /// <summary>
-    /// Easy API (Phase 25): replaces calls to <paramref name="declaringType"/>.<paramref name="methodName"/>
-    /// (an instance method) with <paramref name="shim"/>.  For generic methods supply
+    /// Advanced, untyped API (Phase 25): replaces calls to <paramref name="declaringType"/>.<paramref name="methodName"/>
+    /// (an instance method) with <paramref name="shim"/>. For new code prefer
+    /// <see cref="ReplaceMethod{TResult}(MethodInfo)"/>. For generic methods supply
     /// <paramref name="returnSubstituteInterface"/> (open generic interface, e.g. <c>typeof(IEnumerable&lt;&gt;)</c>).
     /// </summary>
     public Shims ReplaceMethod(Type declaringType, string methodName, Func<object?, object?[], object?> shim, Type? returnSubstituteInterface = null)
@@ -240,6 +242,138 @@ public sealed class Shims : IDisposable
         _harness.WithMethodTarget(externalAssemblyPath, typeFullName, methodName, returnSubstituteInterface);
         _pendingReplacements.Add(s => s._harness.RegisterMethodShim(typeFullName, methodName, shim));
         return this;
+    }
+
+    /// <summary>
+    /// Begins a type-safe replacement for one exact, non-void instance method.
+    /// The reflected return type must exactly equal <typeparamref name="TResult"/>.
+    /// </summary>
+    public TypedMethodReplacementBuilder<TResult> ReplaceMethod<TResult>(MethodInfo method)
+    {
+        ThrowIfDisposed();
+        ThrowIfFinalizedForMethodReplacement();
+        var descriptor = MethodReplacementValidator.ValidateTyped<TResult>(method);
+        _harness.WithMethodTarget(method);
+        return new TypedMethodReplacementBuilder<TResult>(this, descriptor);
+    }
+
+    /// <summary>
+    /// Resolves an exact overload from <paramref name="declaringType"/> and the explicitly supplied
+    /// <paramref name="parameterTypes"/>, then begins a type-safe replacement.
+    /// Use <see cref="Type.EmptyTypes"/> for a zero-argument method.
+    /// </summary>
+    public TypedMethodReplacementBuilder<TResult> ReplaceMethod<TResult>(
+        Type declaringType,
+        string methodName,
+        Type[] parameterTypes)
+        => ReplaceMethod<TResult>(
+            MethodReplacementValidator.ResolveMethod(declaringType, methodName, parameterTypes));
+
+    /// <summary>Begins a type-safe replacement with one or more explicit parameter types.</summary>
+    public TypedMethodReplacementBuilder<TResult> ReplaceMethod<TResult>(
+        Type declaringType,
+        string methodName,
+        Type firstParameterType,
+        params Type[] additionalParameterTypes)
+        => ReplaceMethod<TResult>(
+            declaringType,
+            methodName,
+            MethodReplacementValidator.CombineParameterTypes(
+                firstParameterType,
+                additionalParameterTypes));
+
+    /// <summary>
+    /// Resolves an exact overload on <typeparamref name="TTarget"/> and begins a type-safe replacement.
+    /// Use <see cref="Type.EmptyTypes"/> for a zero-argument method.
+    /// </summary>
+    public TypedMethodReplacementBuilder<TResult> ReplaceMethod<TTarget, TResult>(
+        string methodName,
+        Type[] parameterTypes)
+        => ReplaceMethod<TResult>(typeof(TTarget), methodName, parameterTypes);
+
+    /// <summary>Begins a type-safe replacement on <typeparamref name="TTarget"/> with explicit parameter types.</summary>
+    public TypedMethodReplacementBuilder<TResult> ReplaceMethod<TTarget, TResult>(
+        string methodName,
+        Type firstParameterType,
+        params Type[] additionalParameterTypes)
+        => ReplaceMethod<TResult>(
+            typeof(TTarget),
+            methodName,
+            firstParameterType,
+            additionalParameterTypes);
+
+    /// <summary>Begins a type-safe replacement for one exact void instance method.</summary>
+    public VoidMethodReplacementBuilder ReplaceVoidMethod(MethodInfo method)
+    {
+        ThrowIfDisposed();
+        ThrowIfFinalizedForMethodReplacement();
+        var descriptor = MethodReplacementValidator.ValidateVoid(method);
+        _harness.WithMethodTarget(method);
+        return new VoidMethodReplacementBuilder(this, descriptor);
+    }
+
+    /// <summary>
+    /// Resolves an exact void overload. Use <see cref="Type.EmptyTypes"/> for a zero-argument method.
+    /// </summary>
+    public VoidMethodReplacementBuilder ReplaceVoidMethod(
+        Type declaringType,
+        string methodName,
+        Type[] parameterTypes)
+        => ReplaceVoidMethod(
+            MethodReplacementValidator.ResolveMethod(declaringType, methodName, parameterTypes));
+
+    /// <summary>Begins a void replacement with one or more explicit parameter types.</summary>
+    public VoidMethodReplacementBuilder ReplaceVoidMethod(
+        Type declaringType,
+        string methodName,
+        Type firstParameterType,
+        params Type[] additionalParameterTypes)
+        => ReplaceVoidMethod(
+            declaringType,
+            methodName,
+            MethodReplacementValidator.CombineParameterTypes(
+                firstParameterType,
+                additionalParameterTypes));
+
+    /// <summary>
+    /// Resolves an exact void overload on <typeparamref name="TTarget"/>.
+    /// Use <see cref="Type.EmptyTypes"/> for a zero-argument method.
+    /// </summary>
+    public VoidMethodReplacementBuilder ReplaceVoidMethod<TTarget>(
+        string methodName,
+        Type[] parameterTypes)
+        => ReplaceVoidMethod(typeof(TTarget), methodName, parameterTypes);
+
+    /// <summary>Begins a void replacement on <typeparamref name="TTarget"/> with explicit parameter types.</summary>
+    public VoidMethodReplacementBuilder ReplaceVoidMethod<TTarget>(
+        string methodName,
+        Type firstParameterType,
+        params Type[] additionalParameterTypes)
+        => ReplaceVoidMethod(
+            typeof(TTarget),
+            methodName,
+            firstParameterType,
+            additionalParameterTypes);
+
+    internal void RegisterTypedMethodReplacement(
+        MethodReplacementDescriptor descriptor,
+        IReadOnlyList<IShimArgumentMatcher>? matchers,
+        Func<object?, object?[], object?> shim)
+    {
+        ThrowIfDisposed();
+        ThrowIfFinalizedForMethodReplacement();
+        ThrowHelper.ThrowIfNull(descriptor);
+        ThrowHelper.ThrowIfNull(shim);
+
+        if (matchers is not null)
+            MethodReplacementValidator.ValidateMatchers(descriptor.Method, matchers);
+
+        var capturedMatchers = matchers?.ToArray();
+        _pendingReplacements.Add(s => s._harness.RegisterMethodShim(
+            descriptor.Method,
+            shim,
+            capturedMatchers,
+            descriptor.RegistrationSource));
     }
 
     private void DeclareNewTarget(Type type)
@@ -558,7 +692,14 @@ public sealed class Shims : IDisposable
                 (instance.GetType().FullName ?? instance.GetType().Name) + ".");
         }
 
-        method.Invoke(instance, args);
+        try
+        {
+            method.Invoke(instance, args);
+        }
+        catch (TargetInvocationException exception) when (exception.InnerException is ShimException)
+        {
+            ExceptionDispatchInfo.Capture(exception.InnerException).Throw();
+        }
     }
 
     /// <summary>
@@ -632,6 +773,13 @@ public sealed class Shims : IDisposable
     /// or <see langword="null"/> if no dispatch has occurred.
     /// </summary>
     public StaticDispatchDiagnostics? LastStaticDispatchDiagnostics => _context?.LastStaticDispatchDiagnostics;
+
+    /// <summary>
+    /// Gets exact signature, rule selection, return validation, and fallback diagnostics for the
+    /// most recent rewritten instance-method dispatch in this session.
+    /// </summary>
+    public MethodDispatchDiagnostics? LastMethodDispatchDiagnostics =>
+        _context?.LastMethodDispatchDiagnostics;
 
     /// <summary>
     /// Gets the underlying low-level harness.  Exposed for advanced scenarios; most callers should
@@ -771,6 +919,18 @@ public sealed class Shims : IDisposable
                 "        CreateObject/Create/Invoke call; new targets are locked in at that point.",
                 "Hint: create a new Shims session (Shims.ForAssembly(...) or Shims.For<T>()) and declare",
                 "      every ReplaceNew(...) before the first CreateObject/Create/Invoke."));
+        }
+    }
+
+    private void ThrowIfFinalizedForMethodReplacement()
+    {
+        if (_finalized)
+        {
+            throw new InvalidOperationException(string.Join(
+                Environment.NewLine,
+                "ReplaceMethod/ReplaceVoidMethod failed: rewrite already completed.",
+                "Reason: exact method targets are locked when the target assembly is rewritten.",
+                "Hint: register every method replacement before the first CreateObject/Create/Invoke call."));
         }
     }
 
